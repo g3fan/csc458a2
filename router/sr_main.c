@@ -47,7 +47,7 @@ extern char* optarg;
 #define DEFAULT_TOPO 0
 
 static void usage(char* );
-static void sr_init_instance(struct sr_instance* );
+static void sr_init_instance(struct sr_instance*, struct sr_nat* nat);
 static void sr_destroy_instance(struct sr_instance* );
 static void sr_set_user(struct sr_instance* );
 static void sr_load_rt_wrap(struct sr_instance* sr, char* rtable);
@@ -263,7 +263,7 @@ static void sr_destroy_instance(struct sr_instance* sr)
  *
  *----------------------------------------------------------------------------*/
 
-static void sr_init_instance(struct sr_instance* sr)
+static void sr_init_instance(struct sr_instance* sr, struct sr_nat* nat)
 {
     /* REQUIRES */
     assert(sr);
@@ -275,6 +275,8 @@ static void sr_init_instance(struct sr_instance* sr)
     sr->if_list = 0;
     sr->routing_table = 0;
     sr->logfile = 0;
+
+    sr->nat = nat;
 } /* -- sr_init_instance -- */
 
 /*-----------------------------------------------------------------------------

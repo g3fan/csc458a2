@@ -70,7 +70,7 @@ int sr_connect_to_server(struct sr_instance* ,unsigned short , char* );
 int sr_read_from_server(struct sr_instance* );
 
 /* -- sr_router.c -- */
-void sr_init(struct sr_instance*, struct sr_nat*);
+void sr_init(struct sr_instance*);
 void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
 
 sr_ethernet_hdr_t *sr_copy_ethernet_packet(uint8_t *ethernet_packet, unsigned int len);

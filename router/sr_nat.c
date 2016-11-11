@@ -5,7 +5,7 @@
 #include <unistd.h>
 
 int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
-uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);   { /* Initializes the nat */
+uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* Initializes the nat */
 
   assert(nat);
 

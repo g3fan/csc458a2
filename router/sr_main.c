@@ -70,9 +70,9 @@ int main(int argc, char **argv)
 
     int useNat = 0;
     struct sr_nat nat;
-    uint32_t icmp_timeout;
-    uint32_t tcp_establised_timeout;
-    uint32_t tcp_transitory_timeout;
+    unsigned int  icmp_timeout = 60
+    unsigned int  tcp_establised_timeout = 7440;
+    unsigned int  tcp_transitory_timeout = 300;
 
     printf("Using %s\n", VERSION_INFO);
 

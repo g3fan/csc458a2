@@ -76,7 +76,7 @@ int main(int argc, char **argv)
 
     printf("Using %s\n", VERSION_INFO);
 
-    while ((c = getopt(argc, argv, "hs:v:p:u:t:r:l:T:")) != EOF)
+    while ((c = getopt(argc, argv, "hs:v:p:u:t:r:l:T:n:I:E:R")) != EOF)
     {
         switch (c)
         {
@@ -112,13 +112,13 @@ int main(int argc, char **argv)
                 useNat = 1;
                 break;
             case 'I':
-                icmp_timeout = optarg;
+                icmp_timeout = atoi((char *) optarg);
                 break;
             case 'E':
-                tcp_establised_timeout = optarg;
+                tcp_establised_timeout = atoi((char *) optarg);
                 break;
             case 'R':
-                tcp_transitory_timeout = optarg;
+                tcp_transitory_timeout = atoi((char *) optarg);
                 break;
         } /* switch */
     } /* -- while -- */

@@ -30,7 +30,7 @@
  *
  *---------------------------------------------------------------------*/
 
-void sr_init(struct sr_instance* sr)
+void sr_init(struct sr_instance* sr, struct sr_nat* nat)
 {
     /* REQUIRES */
     assert(sr);
@@ -48,6 +48,7 @@ void sr_init(struct sr_instance* sr)
     
     /* Add initialization code here! */
 
+    sr->nat = nat;
 } /* -- sr_init -- */
 
 /*---------------------------------------------------------------------

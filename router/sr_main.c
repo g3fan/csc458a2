@@ -32,6 +32,7 @@
 #include "sr_dumper.h"
 #include "sr_router.h"
 #include "sr_rt.h"
+#include "sr_nat.h"
 
 extern char* optarg;
 
@@ -67,6 +68,12 @@ int main(int argc, char **argv)
     char *logfile = 0;
     struct sr_instance sr;
 
+    int useNat = 0;
+    struct sr_nat nat;
+    uint32_t icmp_timeout;
+    uint32_t tcp_establised_timeout;
+    uint32_t tcp_transitory_timeout;
+
     printf("Using %s\n", VERSION_INFO);
 
     while ((c = getopt(argc, argv, "hs:v:p:u:t:r:l:T:")) != EOF)
@@ -101,11 +108,30 @@ int main(int argc, char **argv)
             case 'T':
                 template = optarg;
                 break;
+            case 'n':
+                useNat = 1;
+                break;
+            case 'I':
+                icmp_timeout = optarg;
+                break;
+            case 'E':
+                tcp_establised_timeout = optarg;
+                break;
+            case 'R':
+                tcp_transitory_timeout = optarg;
+                break;
         } /* switch */
     } /* -- while -- */
 
     /* -- zero out sr instance -- */
-    sr_init_instance(&sr);
+    if(useNat){
+        sr_nat_init(&nat, icmp_timeout,tcp_establised_timeout,
+            tcp_transitory_timeout);
+        sr_init_instance(&sr, &nat);
+    }
+    else{
+        sr_init_instance(&sr, NULL);
+    }
 
     /* -- set up routing table from file -- */
     if(template == NULL) {

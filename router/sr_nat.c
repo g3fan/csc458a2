@@ -4,7 +4,8 @@
 #include "sr_nat.h"
 #include <unistd.h>
 
-int sr_nat_init(struct sr_nat *nat) { /* Initializes the nat */
+int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
+uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);   { /* Initializes the nat */
 
   assert(nat);
 
@@ -25,6 +26,10 @@ int sr_nat_init(struct sr_nat *nat) { /* Initializes the nat */
 
   nat->mappings = NULL;
   /* Initialize any variables here */
+
+  nat->icmp_query_timeout = icmp_query_timeout;
+  nat->tcp_established_idle_timeout = tcp_established_idle_timeout;
+  nat->tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
 
   return success;
 }
@@ -96,6 +101,13 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   /* handle insert here, create a mapping, and then return a copy of it */
   struct sr_nat_mapping *mapping = NULL;
 
+
   pthread_mutex_unlock(&(nat->lock));
   return mapping;
+}
+
+struct sr_nat_mapping* create_nat_mapping(uint32_t ip_int, uint32_t ip_ext, uint16_t aux_int, uint8_t *icmp_data,
+  sr_nat_mapping_type type, 
+  sr_nat_mapping_direction_type direction_type){
+
 }

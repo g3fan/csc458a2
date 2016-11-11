@@ -33,6 +33,10 @@ struct sr_nat {
   /* add any fields here */
   struct sr_nat_mapping *mappings;
 
+  uint32_t icmp_query_timeout;
+  uint32_t tcp_established_idle_timeout;
+  uint32_t tcp_transitory_idle_timeout;
+
   /* threading */
   pthread_mutex_t lock;
   pthread_mutexattr_t attr;
@@ -41,7 +45,8 @@ struct sr_nat {
 };
 
 
-int   sr_nat_init(struct sr_nat *nat);     /* Initializes the nat */
+int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
+uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);     /* Initializes the nat */
 int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
 void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
 
@@ -60,5 +65,8 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
 struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
 
-
+/*added*/
+struct sr_nat_mapping* create_nat_mapping(uint32_t ip_int, uint32_t ip_ext, uint16_t aux_int, uint8_t *icmp_data,
+  sr_nat_mapping_type type, 
+  sr_nat_mapping_direction_type direction_type);
 #endif

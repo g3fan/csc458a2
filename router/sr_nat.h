@@ -67,6 +67,5 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
 /*added*/
 struct sr_nat_mapping* create_nat_mapping(uint32_t ip_int, uint32_t ip_ext, uint16_t aux_int, uint8_t *icmp_data,
-  sr_nat_mapping_type type, 
-  sr_nat_mapping_direction_type direction_type);
+  sr_nat_mapping_type type);
 #endif

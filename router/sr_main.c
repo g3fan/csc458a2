@@ -70,13 +70,13 @@ int main(int argc, char **argv)
 
     int useNat = 0;
     struct sr_nat nat;
-    unsigned int  icmp_timeout = 60
-    unsigned int  tcp_establised_timeout = 7440;
+    unsigned int  icmp_timeout = 60;
+    unsigned int  tcp_established_timeout = 7440;
     unsigned int  tcp_transitory_timeout = 300;
 
     printf("Using %s\n", VERSION_INFO);
 
-    while ((c = getopt(argc, argv, "hs:v:p:u:t:r:l:T:n:I:E:R")) != EOF)
+    while ((c = getopt(argc, argv, "hs:v:p:u:t:r:l:T:n:I:E:R:")) != EOF)
     {
         switch (c)
         {
@@ -115,7 +115,7 @@ int main(int argc, char **argv)
                 icmp_timeout = atoi((char *) optarg);
                 break;
             case 'E':
-                tcp_establised_timeout = atoi((char *) optarg);
+                tcp_established_timeout = atoi((char *) optarg);
                 break;
             case 'R':
                 tcp_transitory_timeout = atoi((char *) optarg);
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
 
     /* -- zero out sr instance -- */
     if(useNat){
-        sr_nat_init(&nat, icmp_timeout,tcp_establised_timeout,
+        sr_nat_init(&nat, icmp_timeout,tcp_established_timeout,
             tcp_transitory_timeout);
         sr_init_instance(&sr, &nat);
     }

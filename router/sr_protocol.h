@@ -180,6 +180,7 @@ enum sr_ip_protocol {
 enum sr_icmp_type {
   icmp_type_echo_reply = 0x0000,
   icmp_type_dest_unreachable = 0x0003,
+  icmp_type_echo_request = 0x0008,
   icmp_time_exceeded = 0x000b, /* 11 in decimal */
 };
 

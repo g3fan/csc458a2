@@ -5,6 +5,12 @@
 #include <inttypes.h>
 #include <time.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define sr_IFACE_NAMELEN 32
+#define START_PORT 1025
+#define END_PORT 65535
 
 typedef enum {
   nat_mapping_icmp,
@@ -49,9 +55,10 @@ struct sr_nat {
 
   uint32_t external_if_ip;
   uint32_t internal_if_ip;
+
+  unsigned int currentPort;
 };
 
-int currentPort = 1025;
 int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
 uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);     /* Initializes the nat */
 int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
@@ -75,4 +82,6 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 /*added*/
 struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
+
+uint16_t getFreePort(struct sr_nat *nat);
 #endif

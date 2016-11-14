@@ -70,16 +70,19 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
   pthread_mutex_lock(&(nat->lock));
 
   /* handle lookup here, malloc and assign to copy */
-  struct sr_nat_mapping *copy = NULL;
+  struct sr_nat_mapping *copy = malloc(sizeof(struct sr_nat_mapping));
   struct sr_nat_mapping *map_walker = nat->mappings;
+
   while(map_walker){
-    if(map_walker->type == type && map_walker->aux_ext = aux_ext){
+    if(map_walker->type == type && map_walker->aux_ext == aux_ext){
       /*fprintf(stderr, "Found external mapping match\n")*/
+      copy = malloc(sizeof(struct sr_nat_mapping));
       memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
       break;
     }
     map_walker = map_walker->next;
   }
+
   pthread_mutex_unlock(&(nat->lock));
   return copy;
 }
@@ -95,9 +98,10 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
   struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *map_walker = nat->mappings;
   while(map_walker){
-    if(map_walker->type == type && map_walker->aux_int = aux_int &&
-      map_walker->ip_int = ip_int){
+    if(map_walker->type == type && map_walker->aux_int == aux_int &&
+      map_walker->ip_int == ip_int){
       /*fprintf(stderr, "Found interal mapping match\n")*/
+      copy = malloc(sizeof(struct sr_nat_mapping));
       memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
       break;
     }
@@ -116,17 +120,17 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   pthread_mutex_lock(&(nat->lock));
 
   /* handle insert here, create a mapping, and then return a copy of it */
-  struct sr_nat_mapping *mapping = NULL;
-  struct sr_nat_mapping *check_internal_map_exists = sr_nat_lookup_internal(struct sr_nat *nat,
-    uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
-  if(check_internal_map_exists){
+  struct sr_nat_mapping *mapping = malloc(sizeof(struct sr_nat_mapping));
+  struct sr_nat_mapping *check_internal_map_exists = sr_nat_lookup_internal(nat,
+    ip_int, aux_int, type);
+  if (check_internal_map_exists != NULL) {
     memcpy(mapping, check_internal_map_exists, sizeof(struct sr_nat_mapping));
   }
   else{
-    struct sr_nat_mapping newmap = create_nat_mapping(struct sr_nat *nat,
-      uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
-    newmap->next = nat->next;
-    nat->next = newmap;
+    struct sr_nat_mapping *newmap = create_nat_mapping(nat,
+      ip_int, aux_int, type);
+    newmap->next = nat->mappings;
+    nat->mappings = newmap;
     memcpy(mapping, newmap, sizeof(struct sr_nat_mapping));
   }
 
@@ -139,18 +143,21 @@ struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
     struct sr_nat_mapping *newmap = malloc(sizeof(struct sr_nat_mapping));
     newmap->type = type;
     newmap->ip_int = ip_int; 
-    newmap->ip_ext = external_if_ip 
+    newmap->ip_ext = nat->external_if_ip;
     newmap->aux_int = aux_int; 
     newmap->aux_ext = getFreePort(nat);
     newmap->last_updated = time(NULL);
     newmap->conns = NULL;
-    newmap->next = NULL;;
+    newmap->next = NULL;
     return newmap;
 }
 
 uint16_t getFreePort(struct sr_nat *nat){
-  if(currentPort==65536-1){
-    currentPort = 1025;
+  if (nat->currentPort >= END_PORT) {
+    nat->currentPort = START_PORT;
+  } else {
+    nat->currentPort++;
   }
-  return currentPort++;
+
+  return nat->currentPort;
 }

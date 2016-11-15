@@ -127,6 +127,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
       uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
     newmap->next = nat->next;
     nat->next = newmap;
+    memcpy(mapping, newmap, sizeof(struct sr_nat_mapping));
   }
 
   pthread_mutex_unlock(&(nat->lock));
@@ -140,7 +141,7 @@ struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
     newmap->ip_int = ip_int; 
     newmap->ip_ext = external_if_ip 
     newmap->aux_int = aux_int; 
-    newmap->aux_ext =  
+    newmap->aux_ext = getFreePort(nat);
     newmap->last_updated = time(NULL);
     newmap->conns = NULL;
     newmap->next = NULL;;

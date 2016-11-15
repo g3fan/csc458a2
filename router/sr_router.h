@@ -36,6 +36,9 @@
 struct sr_if;
 struct sr_rt;
 
+static const char internalInterface[] = "eth1";
+static const char externalInterface[] = "eth2";
+
 /* ----------------------------------------------------------------------------
  * struct sr_instance
  *
@@ -70,24 +73,32 @@ int sr_connect_to_server(struct sr_instance* ,unsigned short , char* );
 int sr_read_from_server(struct sr_instance* );
 
 /* -- sr_router.c -- */
-void sr_init(struct sr_instance*);
+void sr_init(struct sr_instance*, struct sr_nat*);
 void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
+
+void sr_handle_arp_request(struct sr_instance* sr, struct sr_ethernet_hdr *ethernet_hdr, struct sr_arp_hdr *arp_hdr, struct sr_if* self_interface);
+void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, uint8_t *ip_packet);
+void sr_handle_packet_forward(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
+
+int sr_is_packet_recipient(struct sr_instance *sr, uint32_t ip);
+int sr_ip_packet_is_valid(uint8_t *ip_packet, unsigned int ip_packet_len);
+
+void queue_ethernet_packet(struct sr_instance *sr, uint8_t *ip_packet, unsigned int ip_packet_len, uint8_t* original_eth_src);
+void sr_create_send_ethernet_packet(struct sr_instance* sr, uint8_t* ether_shost, uint8_t* ether_dhost, uint16_t ethertype, uint8_t *data, uint16_t len);
+void createAndSendIPPacket(struct sr_instance* sr, uint32_t ip_src, uint32_t ip_dest, uint8_t* eth_src, uint8_t* eth_dest, uint8_t* ip_payload, uint8_t size);
 
 sr_ethernet_hdr_t *sr_copy_ethernet_packet(uint8_t *ethernet_packet, unsigned int len);
 struct sr_arp_hdr *sr_copy_arp_hdr(uint8_t *ethernet_packet);
 uint8_t *sr_copy_ip_packet(uint8_t *ethernet_packet, unsigned int ip_packet_len);
+uint8_t *sr_copy_icmp_packet(uint8_t *ip_packet, unsigned int ip_packet_len, unsigned int ip_hdr_len);
 struct sr_if *sr_copy_interface(struct sr_if *interface);
 
-void sr_handle_packet_reply(struct sr_instance* sr, uint8_t *ip_packet, struct sr_ethernet_hdr* ethernet_hdr);
-void sr_handle_arp_request(struct sr_instance* sr, struct sr_ethernet_hdr *ethernet_hdr, struct sr_arp_hdr *arp_hdr, struct sr_if* self_interface);
-int sr_is_packet_recipient(struct sr_instance *sr, uint32_t ip);
-void sr_handle_packet_forward(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet, unsigned int ip_packet_len);
-int sr_ip_packet_is_valid(uint8_t *ip_packet, unsigned int ip_packet_len);
+/* -- NAT functions -- */
+void sr_handle_nat_ip_packet(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, uint8_t *ip_packet, struct sr_if* interface);
+void sr_handle_nat_icmp_packet(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, struct sr_ip_hdr *ip_hdr, struct sr_if* interface);
+void sr_handle_nat_tcp_packet(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, struct sr_ip_hdr *ip_hdr);
 
-void sr_create_send_ethernet_packet(struct sr_instance* sr, uint8_t* ether_shost, uint8_t* ether_dhost, uint16_t ethertype, uint8_t *data, uint16_t len);
-void createAndSendIPPacket(struct sr_instance* sr, uint32_t ip_src, uint32_t ip_dest, uint8_t* eth_src, uint8_t* eth_dest, uint8_t* ip_payload, uint8_t size);
-void createAndSendICMPPacket(struct sr_instance* sr, struct sr_ethernet_hdr* ether_hdr, struct sr_ip_hdr* ip_packet, uint8_t* data, uint8_t size);
-void queue_ethernet_packet(struct sr_instance *sr, uint8_t *ip_packet, unsigned int ip_packet_len, uint8_t* original_eth_src);
+int sr_is_packet_src_internal(struct sr_if* interface);
 
 /* -- sr_if.c -- */
 void sr_add_interface(struct sr_instance* , const char* );

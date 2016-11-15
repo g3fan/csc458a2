@@ -14,7 +14,11 @@ typedef enum {
 
 struct sr_nat_connection {
   /* add TCP connection state data members here */
-
+  uint32_t ip_ext;
+  uint16_t aux_ext;
+  uint32_t ip_remote;
+  uint16_t aux_remote; 
+  time_t last_updated; 
   struct sr_nat_connection *next;
 };
 
@@ -42,9 +46,12 @@ struct sr_nat {
   pthread_mutexattr_t attr;
   pthread_attr_t thread_attr;
   pthread_t thread;
+
+  uint32_t external_if_ip;
+  uint32_t internal_if_ip;
 };
 
-
+int currentPort = 1025;
 int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
 uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);     /* Initializes the nat */
 int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
@@ -66,6 +73,6 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
 
 /*added*/
-struct sr_nat_mapping* create_nat_mapping(uint32_t ip_int, uint32_t ip_ext, uint16_t aux_int, uint8_t *icmp_data,
-  sr_nat_mapping_type type);
+struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
+  uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
 #endif

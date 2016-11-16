@@ -31,6 +31,9 @@ uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* 
   nat->tcp_established_idle_timeout = tcp_established_idle_timeout;
   nat->tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
 
+  nat->currentPort = START_PORT;
+  nat->currentId = START_ID;
+
   return success;
 }
 
@@ -144,15 +147,21 @@ struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
     newmap->type = type;
     newmap->ip_int = ip_int; 
     newmap->ip_ext = nat->external_if_ip;
-    newmap->aux_int = aux_int; 
-    newmap->aux_ext = getFreePort(nat);
+    newmap->aux_int = aux_int;
+    
+    if (type == nat_mapping_icmp) {
+      newmap->aux_ext = getFreeNATPort(nat);
+    } else {
+      newmap->aux_ext = getFreeNATId(nat);
+    }
+
     newmap->last_updated = time(NULL);
     newmap->conns = NULL;
     newmap->next = NULL;
     return newmap;
 }
 
-uint16_t getFreePort(struct sr_nat *nat){
+uint16_t getFreeNATPort(struct sr_nat *nat) {
   if (nat->currentPort >= END_PORT) {
     nat->currentPort = START_PORT;
   } else {
@@ -160,4 +169,14 @@ uint16_t getFreePort(struct sr_nat *nat){
   }
 
   return nat->currentPort;
+}
+
+uint16_t getFreeNATId(struct sr_nat *nat) {
+  if (nat->currentId >= END_ID) {
+    nat->currentId = START_ID;
+  } else {
+    nat->currentId++;
+  }
+
+  return nat->currentId;
 }

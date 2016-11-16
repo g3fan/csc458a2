@@ -65,19 +65,17 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr){
                 print_hdrs(packet->buf, packet->len);
                 struct sr_rt* targetRT;
 
-		uint32_t ip_dst;
+		        uint32_t ip_dst;
                 if(sr_is_packet_recipient(sr, currIPHdr->ip_src)){
-                     fprintf(stderr, "we are reply\n");
-                     targetRT = get_longest_prefix_match_interface(sr->routing_table, currIPHdr->ip_dst);
-                     ip_dst = currIPHdr->ip_dst;
-                     /*we swap src and dst IPs here so the createIPheader works later on*/
-                }
-                else{ fprintf(stderr, "we are forwarding\n");
-                    targetRT = get_longest_prefix_match_interface(sr->routing_table, currIPHdr->ip_src);
+                    ip_dst = currIPHdr->ip_dst;
+                } else {
+                    /* Swap source and destination IPs in the case of a forwarded packet as the ICMP destination will be the source */
                     ip_dst = currIPHdr->ip_src;
                 }
 
+                targetRT = get_longest_prefix_match_interface(sr->routing_table, ip_dst);
 
+                /* TODO: Perform reverse mapping in case of NAT to send ICMP host unreachable back to internal client */
                 struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
 
                 sr_object_t sendICMPPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_1, 0, (uint8_t*)currIPHdr); 
@@ -119,7 +117,7 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr){
 
             sr_send_packet(sr, arp_packet.packet, arp_packet.len, rt->interface);
             req->sent = time(NULL);
-	    req->times_sent++;
+	        req->times_sent++;
 
             free(newArpReq);
             free(arp_packet.packet);

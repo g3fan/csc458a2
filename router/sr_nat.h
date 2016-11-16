@@ -92,7 +92,7 @@ uint16_t getFreePort(struct sr_nat *nat);
 /*I am assuming the ethernet and ip packets are in network order*/
 /* returns 1 for success, 0 means drop the packet*/
 /*this functions modifies the passed in pointers*/
-int nat_handle_interal_ip(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
+int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
 
 struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote);

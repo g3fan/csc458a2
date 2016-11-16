@@ -168,17 +168,6 @@ int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr,
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
 
   if(ip_hdr->ip_p == ip_protocol_icmp){
-      uint16_t source_port = *(uint16_t*)(ip_packet + sizeof(sr_ip_hdr_t));
-      uint16_t dest_port = *(uint16_t*)(ip_packet + sizeof(sr_ip_hdr_t) + 2);
-    /*add logic to drop UDP packets*/
-      struct sr_nat_mapping *map = sr_nat_lookup_internal(nat, ip_hdr->ip_src, source_port, nat_mapping_tcp);
-      if(!map){
-        map = sr_nat_insert_mapping(nat, ip_hdr->ip_src, source_port, nat_mapping_tcp);
-      }
-      create_and_insert_nat_connection(map, ip_hdr->ip_dst, dest_port, map->ip_ext, map->aux_ext);
-      ip_hdr->ip_src = map->ip_ext;
-      memcpy(ip_packet + sizeof(sr_ip_hdr_t), &(map->aux_ext), sizeof(uint16_t));/*set tcp source port to mapping*/
-      free(map);
 
   }
   else{
@@ -191,9 +180,11 @@ int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr,
       }
       create_and_insert_nat_connection(map, ip_hdr->ip_dst, dest_port, map->ip_ext, map->aux_ext);
       ip_hdr->ip_src = map->ip_ext;
+
+      /*change this to a function to change TCP port to nat mapping*/
       memcpy(ip_packet + sizeof(sr_ip_hdr_t), &(map->aux_ext), sizeof(uint16_t));/*set tcp source port to mapping*/
       
-      /*edit cksums*/
+      /*edit cksums */
 
       ip_hdr->ip_sum = 0x00;
       ip_hdr->ip_sum = cksum(ip_packet, sizeof(sr_ip_hdr_t));
@@ -203,6 +194,7 @@ int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr,
       uint8_t zero8 = 0x0;
       uint16_t zero16 = 0x00;
 
+      /*creates psuedo header for TCP and calculate*/
       uint8_t* dummy = malloc(length);
       memcpy(dummy, ip_packet+12, 4);
       memcpy(dummy, ip_packet+16, 4);
@@ -215,6 +207,7 @@ int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr,
 
       memcpy(ip_packet+sizeof(sr_ip_hdr_t)+16, &checksum, 2);
 
+      free(dummy);
       free(map);
   }
   return 1;
@@ -233,6 +226,9 @@ struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping
     output->last_updated = time(NULL); 
     output->next = map->conns;
     map->conns = output;
+  }
+  else{/*update the current connection's last_updated field*/
+    output->last_updated = time(NULL); 
   }
   return output;
 }

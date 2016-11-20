@@ -25,11 +25,21 @@ uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* 
   /* CAREFUL MODIFYING CODE ABOVE THIS LINE! */
 
   nat->mappings = NULL;
-  /* Initialize any variables here */
 
+  /* Initialize any variables here */
   nat->icmp_query_timeout = icmp_query_timeout;
   nat->tcp_established_idle_timeout = tcp_established_idle_timeout;
   nat->tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
+
+  nat->tcp_port_mapping = malloc(sizeof(struct sr_aux_ext_mapping_wrap));
+  nat->tcp_port_mapping->current_aux = START_PORT;
+  nat->tcp_port_mapping->mappings = NULL;
+
+  nat->icmp_id_mapping = malloc(sizeof(struct sr_aux_ext_mapping_wrap));
+  nat->icmp_id_mapping->current_aux = START_ID;
+  nat->icmp_id_mapping->mappings = NULL;
+
+  /*TODO: need to initialize external_if_ip and internal_if_ip*/
 
   return success;
 }
@@ -62,6 +72,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
   return NULL;
 }
 
+
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */
 struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
@@ -70,11 +81,30 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
   pthread_mutex_lock(&(nat->lock));
 
   /* handle lookup here, malloc and assign to copy */
-  struct sr_nat_mapping *copy = malloc(sizeof(struct sr_nat_mapping));
+  struct sr_nat_mapping *map_walker = nat->mappings;
+
+  struct sr_nat_mapping *copy = sr_nat_lookup_external_nolock(nat,
+    aux_ext, type);
+
+  pthread_mutex_unlock(&(nat->lock));
+  return copy;
+}
+
+
+/* This function implements the lookup_external function without lock,
+   this implementation is separated from locks to prevent dead lock when
+   called somewhere else, this function should only be called with lock 
+   acquired. */
+struct sr_nat_mapping *sr_nat_lookup_external_nolock(struct sr_nat *nat,
+    uint16_t aux_ext, sr_nat_mapping_type type ) {
+
+  /* handle lookup here, malloc and assign to copy */
+  struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *map_walker = nat->mappings;
 
   while(map_walker){
     if(map_walker->type == type && map_walker->aux_ext == aux_ext){
+
       /*fprintf(stderr, "Found external mapping match\n")*/
       copy = malloc(sizeof(struct sr_nat_mapping));
       memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
@@ -83,9 +113,9 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
     map_walker = map_walker->next;
   }
 
-  pthread_mutex_unlock(&(nat->lock));
   return copy;
 }
+
 
 /* Get the mapping associated with given internal (ip, port) pair.
    You must free the returned structure if it is not NULL. */
@@ -95,11 +125,28 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
   pthread_mutex_lock(&(nat->lock));
 
   /* handle lookup here, malloc and assign to copy. */
+  struct sr_nat_mapping *copy = sr_nat_lookup_internal_nolock(nat,
+    ip_int, aux_int, type);
+
+  pthread_mutex_unlock(&(nat->lock));
+  return copy;
+}
+
+
+/* This function implements the lookup_internal function without lock,
+   this implementation is separated from locks to prevent dead lock when
+   called somewhere else, this function should only be called with lock 
+   acquired. */
+struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
+  uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
+
   struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *map_walker = nat->mappings;
+
   while(map_walker){
     if(map_walker->type == type && map_walker->aux_int == aux_int &&
       map_walker->ip_int == ip_int){
+
       /*fprintf(stderr, "Found interal mapping match\n")*/
       copy = malloc(sizeof(struct sr_nat_mapping));
       memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
@@ -107,60 +154,100 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
     }
     map_walker = map_walker->next;
   }
-  pthread_mutex_unlock(&(nat->lock));
   return copy;
 }
 
+
 /* Insert a new mapping into the nat's mapping table.
-   Actually returns a copy to the new mapping, for thread safety.
- */
+   Actually returns a copy to the new mapping, for thread safety. */
 struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
 
   pthread_mutex_lock(&(nat->lock));
 
   /* handle insert here, create a mapping, and then return a copy of it */
-  struct sr_nat_mapping *mapping = malloc(sizeof(struct sr_nat_mapping));
-  struct sr_nat_mapping *check_internal_map_exists = sr_nat_lookup_internal(nat,
-    ip_int, aux_int, type);
-  if (check_internal_map_exists != NULL) {
-    memcpy(mapping, check_internal_map_exists, sizeof(struct sr_nat_mapping));
+  struct sr_nat_mapping *copy = malloc(sizeof(struct sr_nat_mapping));
+
+  /* Can't just call sr_nat_lookup_internal here, will cause deadlock */
+  struct sr_nat_mapping *interal_mapping = sr_nat_lookup_internal_nolock(
+    nat, ip_int, aux_int, type);
+
+  /* If the mapping does not exists, create the mapping */
+  if (interal_mapping == NULL) {
+    interal_mapping = sr_nat_create_mapping(nat, ip_int, aux_int, type);
+    interal_mapping->next = nat->mappings;
+    nat->mappings = interal_mapping;
   }
-  else{
-    struct sr_nat_mapping *newmap = create_nat_mapping(nat,
-      ip_int, aux_int, type);
-    newmap->next = nat->mappings;
-    nat->mappings = newmap;
-    memcpy(mapping, newmap, sizeof(struct sr_nat_mapping));
-  }
+
+  /* Create a copy of the mapping */
+  memcpy(copy, interal_mapping, sizeof(struct sr_nat_mapping));
 
   pthread_mutex_unlock(&(nat->lock));
-  return mapping;
+  return copy;
 }
 
-struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
+
+/* Create a NAT mapping.
+   Should only be called with lock acquired, because it may modify the unique aux_ext mapping. */
+struct sr_nat_mapping *sr_nat_create_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ){
-    struct sr_nat_mapping *newmap = malloc(sizeof(struct sr_nat_mapping));
-    newmap->type = type;
-    newmap->ip_int = ip_int; 
-    newmap->ip_ext = nat->external_if_ip;
-    newmap->aux_int = aux_int; 
-    newmap->aux_ext = getFreePort(nat);
-    newmap->last_updated = time(NULL);
-    newmap->conns = NULL;
-    newmap->next = NULL;
-    return newmap;
+
+  struct sr_nat_mapping *newmap = malloc(sizeof(struct sr_nat_mapping));
+  newmap->type = type;
+  newmap->ip_int = ip_int; 
+  newmap->ip_ext = nat->external_if_ip;
+  newmap->aux_int = aux_int; 
+  newmap->aux_ext = get_unique_aux_ext(nat, ip_int, aux_int, type);
+  newmap->last_updated = time(NULL);
+  newmap->conns = NULL;
+  newmap->next = NULL;
+  return newmap;
 }
 
-uint16_t getFreePort(struct sr_nat *nat){
-  if (nat->currentPort >= END_PORT) {
-    nat->currentPort = START_PORT;
+
+/* Should only be called with lock acquired.
+
+   Need to be "endpoint independent", which means:
+   unique(internal IP + internal port) -> unique(external port)
+   unique(internal IP + internal sequence ID) -> unique( external sequence ID)
+
+   We will assumes the number of unique(internal IP + aux_int) will not exceed 
+   (END_PORT-START_PORT) and (END_ID-START_ID) since we want unique mappings. */
+uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type){
+
+  /* Get the mapping based on type */
+  struct sr_aux_ext_mapping_wrap *aux_ext_mapping = NULL;
+
+  if (type == nat_mapping_tcp) {
+    aux_ext_mapping = nat->tcp_port_mapping;
   } else {
-    nat->currentPort++;
+    aux_ext_mapping = nat->icmp_id_mapping;
   }
 
-  return nat->currentPort;
+  /* Search through the unique mapping */
+  struct sr_aux_ext_mapping *map_walker = aux_ext_mapping->mappings;
+
+  while (mapping_walker) {
+    if(map_walker->ip_int == ip_int && map_walker->aux_int == aux_int) {
+      return map_walker->aux_ext;
+    }
+    map_walker = map_walker->next;
+  }
+
+  /* If no mapping found, create mapping and assign the current available port/id */
+  struct sr_aux_ext_mapping *new_mapping = malloc(sizeof(sr_aux_ext_mapping));
+  new_mapping->ip_int = ip_int;
+  new_mapping->aux_int = aux_int;
+  new_mapping->aux_ext = aux_ext_mapping->current_aux;
+  new_mapping->next = aux_ext_mapping-mappings;
+
+  /* Update the mapping */
+  aux_ext_mapping->mappings = new_mapping;
+  aux_ext_mapping->current_aux += 1;
+
+  return new_mapping->aux_ext;
 }
+
 
 int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet){
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;

@@ -15,6 +15,8 @@
 #define sr_IFACE_NAMELEN 32
 #define START_PORT 1025
 #define END_PORT 65535
+#define START_ID 0
+#define END_ID 65535
 
 typedef enum {
   nat_mapping_icmp,
@@ -43,7 +45,25 @@ struct sr_nat_mapping {
   struct sr_nat_mapping *next;
 };
 
+struct sr_aux_ext_mapping_wrap {
+  uint16_t current_aux;
+  struct sr_aux_ext_mapping *mappings;
+};
+
+struct sr_aux_ext_mapping {
+  uint32_t ip_int; /* internal ip addr */
+  uint16_t aux_int; /* internal port or icmp id */
+  uint16_t aux_ext; /* external port or icmp id */
+  struct sr_aux_ext_mapping *next;
+};
+
 struct sr_nat {
+  /* threading */
+  pthread_mutex_t lock;
+  pthread_mutexattr_t attr;
+  pthread_attr_t thread_attr;
+  pthread_t thread;
+
   /* add any fields here */
   struct sr_nat_mapping *mappings;
 
@@ -51,16 +71,13 @@ struct sr_nat {
   uint32_t tcp_established_idle_timeout;
   uint32_t tcp_transitory_idle_timeout;
 
-  /* threading */
-  pthread_mutex_t lock;
-  pthread_mutexattr_t attr;
-  pthread_attr_t thread_attr;
-  pthread_t thread;
-
+  /* constant interface IP */
   uint32_t external_if_ip;
   uint32_t internal_if_ip;
 
-  unsigned int currentPort;
+  /* unique mapping of (internal IP + aux_int) to aux_ext */
+  struct sr_aux_ext_mapping_wrap *tcp_port_mapping;
+  struct sr_aux_ext_mapping_wrap *icmp_id_mapping;
 };
 
 int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
@@ -87,7 +104,14 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
 
-uint16_t getFreePort(struct sr_nat *nat);
+struct sr_nat_mapping *sr_nat_lookup_external_nolock(struct sr_nat *nat,
+    uint16_t aux_ext, sr_nat_mapping_type type )
+
+struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
+  uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
+
+uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, 
+  uint16_t aux_int, sr_nat_mapping_type type);
 
 /*I am assuming the ethernet and ip packets are in network order*/
 /* returns 1 for success, 0 means drop the packet*/

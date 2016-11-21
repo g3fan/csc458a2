@@ -32,11 +32,11 @@ uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* 
   nat->tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
 
   nat->tcp_port_mapping = malloc(sizeof(struct sr_aux_ext_mapping_wrap));
-  nat->tcp_port_mapping->current_aux = START_PORT;
+  nat->tcp_port_mapping->current_aux = htons(START_PORT);
   nat->tcp_port_mapping->mappings = NULL;
 
   nat->icmp_id_mapping = malloc(sizeof(struct sr_aux_ext_mapping_wrap));
-  nat->icmp_id_mapping->current_aux = START_ID;
+  nat->icmp_id_mapping->current_aux = htons(START_ID);
   nat->icmp_id_mapping->mappings = NULL;
 
   /*TODO: need to initialize external_if_ip and internal_if_ip*/
@@ -144,9 +144,6 @@ struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
   while(map_walker){
     if(map_walker->type == type && map_walker->aux_int == aux_int &&
       map_walker->ip_int == ip_int){
-
-      /*fprintf(stderr, "Found internal mapping match\n")*/
-      /*fprintf(stderr, "Found internal mapping match\n")*/
       copy = malloc(sizeof(struct sr_nat_mapping));
       memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
       break;
@@ -157,7 +154,7 @@ struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
 }
 
 
-/* Insert a new mapping into the nat's mapping table.
+/* Insert a new mapping into the nat's mapping table if it does not exist.
    Actually returns a copy to the new mapping, for thread safety. */
 struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
@@ -180,6 +177,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
   /* Create a copy of the mapping */
   memcpy(copy, internal_mapping, sizeof(struct sr_nat_mapping));
+  free(internal_mapping);
 
   pthread_mutex_unlock(&(nat->lock));
   return copy;
@@ -262,34 +260,38 @@ int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
 
   if(ip_hdr->ip_p == ip_protocol_icmp){
+    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
-  }
-  else{
-      sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+    /* Only need to handle echo requests from internal addresses */
+    if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
+      struct sr_nat_mapping *icmp_mapping = icmp_mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src,
+        icmp_hdr->id, nat_mapping_icmp);
 
-      uint16_t source_port = *(uint16_t*)(ip_packet + sizeof(sr_ip_hdr_t));
-      uint16_t dest_port = *(uint16_t*)(ip_packet + sizeof(sr_ip_hdr_t) + 2);
-      /*add logic to drop UDP packets*/
-      struct sr_nat_mapping *map = sr_nat_lookup_internal(nat, ip_hdr->ip_src, source_port, nat_mapping_tcp);
+      icmp_hdr->id = icmp_mapping->aux_ext;
 
-      if (!map) {
-        map = sr_nat_insert_mapping(nat, ip_hdr->ip_src, source_port, nat_mapping_tcp);
-      }
-
-      create_and_insert_nat_connection(map, ip_hdr->ip_dst, dest_port, map->ip_ext, map->aux_ext);
-      ip_hdr->ip_src = map->ip_ext;
-
-      /*change this to a function to change TCP port to nat mapping*/
-      memcpy(ip_packet + sizeof(sr_ip_hdr_t), &(map->aux_ext), sizeof(uint16_t));/*set tcp source port to mapping*/
-      
-      /* Recalculate ip checksum */
+      ip_hdr->ip_src = icmp_mapping->ip_ext;
       ip_hdr->ip_sum = 0;
       ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
 
+      free(icmp_mapping);
+    }
+  } else {
+      sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+
+      /* Initialize the tcp mapping and connections and apply it to the packet */
+      struct sr_nat_mapping *mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src, tcp_hdr->port_src, nat_mapping_tcp);
+      create_and_insert_nat_connection(mapping, ip_hdr->ip_dst, tcp_hdr->port_dst, mapping->ip_ext, mapping->aux_ext);
+
+      /* Recalculate checksums */
+      tcp_hdr->port_src = mapping->aux_ext;
       tcp_hdr->tcp_sum = 0;
       tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
 
-      free(map);
+      ip_hdr->ip_src = mapping->ip_ext;
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+
+      free(mapping);
   }
   return 1;
 }

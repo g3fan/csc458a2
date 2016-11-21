@@ -110,13 +110,18 @@ void sr_handlepacket(struct sr_instance* sr,
     uint8_t *ip_packet = sr_copy_ip_packet((uint8_t *) ethernet_hdr, ip_packet_len);
     /* Check if the received packet is valid, if not drop the packet*/
     if (sr_ip_packet_is_valid(ip_packet, ip_packet_len)) {
-        if (sr->nat != NULL) {
-          sr_handle_nat_ip_packet(sr, ethernet_hdr, ip_packet, incoming_interface);
-        } 
-        else if (sr_is_packet_recipient(sr, ((sr_ip_hdr_t*)ip_packet)->ip_dst)) {
+        if (sr_nat_is_packet_recipient(sr, incoming_interface, ip_packet)) {
           sr_handle_packet_reply(sr, ethernet_hdr, ip_packet);
-        } 
-        else {
+        } else {
+          /* Preprocess packets with the NAT if it is being used */
+          if (sr->nat != NULL) {
+            if (sr_is_packet_src_internal(incoming_interface)) {
+              sr_nat_handle_internal(sr->nat, ethernet_hdr, ip_packet);
+            } else {
+              /* TODO: sr_nat_handle_external */
+            }
+          }
+
           sr_handle_packet_forward(sr, ethernet_hdr, ip_packet);
         }
     }
@@ -256,6 +261,7 @@ int sr_ip_packet_is_valid(uint8_t *ip_packet, unsigned int ip_packet_len) {
 
 int sr_is_packet_recipient(struct sr_instance *sr, uint32_t ip) {
   struct sr_if* if_walker = sr->if_list;
+
   while(if_walker)
   {
     if(if_walker->ip == ip) { 
@@ -292,7 +298,6 @@ void sr_create_send_ethernet_packet(struct sr_instance* sr, uint8_t* ether_shost
 
   free(ethernet_packet.packet);
 }
-
 
 /* Should pass in correct ip*/
 void createAndSendIPPacket(struct sr_instance* sr, uint32_t ip_src, uint32_t ip_dest, uint8_t* eth_src, uint8_t* eth_dest, uint8_t* ip_payload, uint8_t len) {
@@ -358,43 +363,29 @@ struct sr_if *sr_copy_interface(struct sr_if *interface) {
   return interface_copy;
 }
 
-void sr_handle_nat_ip_packet(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, uint8_t *ip_packet, struct sr_if* interface) {
-  struct sr_ip_hdr* ip_hdr = (sr_ip_hdr_t*) ip_packet;
-
-  if (ip_hdr->ip_p == ip_protocol_icmp) {
-    sr_handle_nat_icmp_packet(sr, ethernet_hdr, ip_hdr, interface);
-  } else if (ip_hdr->ip_p == ip_protocol_tcp) {
-    sr_handle_nat_tcp_packet(sr, ethernet_hdr, ip_hdr);
-  }
-}
-
-void sr_handle_nat_icmp_packet(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, struct sr_ip_hdr *ip_hdr, struct sr_if* interface) {
-  uint8_t *icmp_packet = sr_copy_icmp_packet((uint8_t*)ip_hdr, ntohs(ip_hdr->ip_len), ip_hdr->ip_hl * 4);
-  sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t*) icmp_packet;
-
-  if (sr_is_packet_src_internal(interface)) {
-
-  } else {
-
-  }
-  if (icmp_hdr->icmp_type == icmp_type_echo_request) {
-    if (sr_is_packet_recipient(sr, ip_hdr->ip_dst)) {
-      /* Internal->External echo request */
-
-    } else {
-      /* Echo request is to the router itself */
-    }
-  } else if (icmp_hdr->icmp_type == icmp_type_echo_reply) {
-    /* Echo replies should only occur for internal->external request */
-  }
-
-}
-
-void sr_handle_nat_tcp_packet(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, struct sr_ip_hdr *ip_hdr) {
-
-}
-
 int sr_is_packet_src_internal(struct sr_if* interface) {
   return strcmp(internalInterface, interface->name) != 0;
 }
 
+/* Helper function to determine if the router is the recipient of a packet while
+   handling cases with NAT */
+int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, uint8_t *ip_packet) {
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)ip_packet;
+
+  if (sr->nat != NULL && ip_hdr->ip_p == ip_protocol_icmp) {
+    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
+
+    /* Determine if a icmp packet from an external source is to the router or an internal source */
+    if (!sr_is_packet_src_internal(interface)) {
+      struct sr_nat_mapping *mapping = sr_nat_lookup_external(sr->nat, icmp_hdr->id, nat_mapping_icmp);
+
+      if (mapping == NULL) {
+        return 1;
+      }
+
+      free(mapping);
+    }
+  }
+
+  return sr_is_packet_recipient(sr, ip_hdr->ip_dst);
+}

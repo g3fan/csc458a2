@@ -156,6 +156,17 @@ struct sr_icmp_hdr {
 } __attribute__ ((packed)) ;
 typedef struct sr_icmp_hdr sr_icmp_hdr_t;
 
+/* Structure of a ICMP header for NAT purposes
+ */
+struct sr_icmp_nat_hdr {
+  uint8_t icmp_type;
+  uint8_t icmp_code;
+  uint16_t icmp_sum;
+  uint16_t id;
+  uint16_t seq;
+} __attribute__ ((packed)) ;
+typedef struct sr_icmp_nat_hdr sr_icmp_nat_hdr_t;
+
 
 /* Structure of a type3 ICMP header
  */

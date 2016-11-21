@@ -170,6 +170,40 @@ struct sr_icmp_t3_hdr {
 } __attribute__ ((packed)) ;
 typedef struct sr_icmp_t3_hdr sr_icmp_t3_hdr_t;
 
+/* Structure of a type3 ICMP header
+ */
+struct sr_tcp_hdr {
+  uint16_t port_src;
+  uint16_t port_dst;
+  uint32_t seq_num;
+  uint32_t ack_num;
+  uint8_t protocol;
+  unsigned int offset:4;
+  unsigned int reserved:6;
+  unsigned char urg;
+  unsigned char ack;
+  unsigned char psh;
+  unsigned char rst;
+  unsigned char syn;
+  unsigned char fin;
+  uint16_t window;
+  uint16_t tcp_sum;
+  uint16_t urgent;
+  uint32_t options;
+} __attribute__ ((packed)) ;
+typedef struct sr_tcp_hdr sr_tcp_hdr_t;
+
+/* Structure of a tcp pseudo header for use in tcp checksum calculation
+ */
+struct sr_tcp_pseudo_hdr {
+  uint32_t ip_src;
+  uint32_t ip_dst;
+#define TCP_PSEUDO_RF 0x00      /* reserved fragment flag */
+  uint8_t reserved;
+  uint8_t protocol;
+  uint16_t tcp_length;
+} __attribute__ ((packed)) ;
+typedef struct sr_tcp_pseudo_hdr sr_tcp_pseudo_hdr_t;
 
 enum sr_ip_protocol {
   ip_protocol_icmp = 0x0001,

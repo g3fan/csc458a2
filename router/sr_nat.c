@@ -81,8 +81,6 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
   pthread_mutex_lock(&(nat->lock));
 
   /* handle lookup here, malloc and assign to copy */
-  struct sr_nat_mapping *map_walker = nat->mappings;
-
   struct sr_nat_mapping *copy = sr_nat_lookup_external_nolock(nat,
     aux_ext, type);
 
@@ -147,7 +145,8 @@ struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
     if(map_walker->type == type && map_walker->aux_int == aux_int &&
       map_walker->ip_int == ip_int){
 
-      /*fprintf(stderr, "Found interal mapping match\n")*/
+      /*fprintf(stderr, "Found internal mapping match\n")*/
+      /*fprintf(stderr, "Found internal mapping match\n")*/
       copy = malloc(sizeof(struct sr_nat_mapping));
       memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
       break;
@@ -169,18 +168,18 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   struct sr_nat_mapping *copy = malloc(sizeof(struct sr_nat_mapping));
 
   /* Can't just call sr_nat_lookup_internal here, will cause deadlock */
-  struct sr_nat_mapping *interal_mapping = sr_nat_lookup_internal_nolock(
+  struct sr_nat_mapping *internal_mapping = sr_nat_lookup_internal_nolock(
     nat, ip_int, aux_int, type);
 
   /* If the mapping does not exists, create the mapping */
-  if (interal_mapping == NULL) {
-    interal_mapping = sr_nat_create_mapping(nat, ip_int, aux_int, type);
-    interal_mapping->next = nat->mappings;
-    nat->mappings = interal_mapping;
+  if (internal_mapping == NULL) {
+    internal_mapping = sr_nat_create_mapping(nat, ip_int, aux_int, type);
+    internal_mapping->next = nat->mappings;
+    nat->mappings = internal_mapping;
   }
 
   /* Create a copy of the mapping */
-  memcpy(copy, interal_mapping, sizeof(struct sr_nat_mapping));
+  memcpy(copy, internal_mapping, sizeof(struct sr_nat_mapping));
 
   pthread_mutex_unlock(&(nat->lock));
   return copy;
@@ -209,25 +208,28 @@ struct sr_nat_mapping *sr_nat_create_mapping(struct sr_nat *nat,
 
    Need to be "endpoint independent", which means:
    unique(internal IP + internal port) -> unique(external port)
-   unique(internal IP + internal sequence ID) -> unique( external sequence ID)
-
-   We will assumes the number of unique(internal IP + aux_int) will not exceed 
-   (END_PORT-START_PORT) and (END_ID-START_ID) since we want unique mappings. */
+   unique(internal IP + internal sequence ID) -> unique( external sequence ID) */
 uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type){
 
   /* Get the mapping based on type */
   struct sr_aux_ext_mapping_wrap *aux_ext_mapping = NULL;
+  uint16_t end_aux;
+  uint16_t start_aux;
 
   if (type == nat_mapping_tcp) {
     aux_ext_mapping = nat->tcp_port_mapping;
+    start_aux = START_PORT;
+    end_aux = END_PORT;
   } else {
     aux_ext_mapping = nat->icmp_id_mapping;
+    start_aux = START_ID;
+    end_aux = END_ID;
   }
 
   /* Search through the unique mapping */
   struct sr_aux_ext_mapping *map_walker = aux_ext_mapping->mappings;
 
-  while (mapping_walker) {
+  while (map_walker) {
     if(map_walker->ip_int == ip_int && map_walker->aux_int == aux_int) {
       return map_walker->aux_ext;
     }
@@ -235,21 +237,26 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
   }
 
   /* If no mapping found, create mapping and assign the current available port/id */
-  struct sr_aux_ext_mapping *new_mapping = malloc(sizeof(sr_aux_ext_mapping));
+  struct sr_aux_ext_mapping *new_mapping = malloc(sizeof(struct sr_aux_ext_mapping));
   new_mapping->ip_int = ip_int;
   new_mapping->aux_int = aux_int;
   new_mapping->aux_ext = aux_ext_mapping->current_aux;
-  new_mapping->next = aux_ext_mapping-mappings;
+  new_mapping->next = aux_ext_mapping->mappings;
 
   /* Update the mapping */
   aux_ext_mapping->mappings = new_mapping;
   aux_ext_mapping->current_aux += 1;
 
+  /* Rollover the auxiliary Id if it exceeds the limit */
+  if (aux_ext_mapping->current_aux > end_aux) {
+    aux_ext_mapping->current_aux = start_aux;
+  }
+
   return new_mapping->aux_ext;
 }
 
 
-int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet){
+int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet){
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
 
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
@@ -258,43 +265,30 @@ int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr,
 
   }
   else{
+      sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+
       uint16_t source_port = *(uint16_t*)(ip_packet + sizeof(sr_ip_hdr_t));
       uint16_t dest_port = *(uint16_t*)(ip_packet + sizeof(sr_ip_hdr_t) + 2);
       /*add logic to drop UDP packets*/
       struct sr_nat_mapping *map = sr_nat_lookup_internal(nat, ip_hdr->ip_src, source_port, nat_mapping_tcp);
-      if(!map){
+
+      if (!map) {
         map = sr_nat_insert_mapping(nat, ip_hdr->ip_src, source_port, nat_mapping_tcp);
       }
+
       create_and_insert_nat_connection(map, ip_hdr->ip_dst, dest_port, map->ip_ext, map->aux_ext);
       ip_hdr->ip_src = map->ip_ext;
 
       /*change this to a function to change TCP port to nat mapping*/
       memcpy(ip_packet + sizeof(sr_ip_hdr_t), &(map->aux_ext), sizeof(uint16_t));/*set tcp source port to mapping*/
       
-      /*edit cksums */
+      /* Recalculate ip checksum */
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
 
-      ip_hdr->ip_sum = 0x00;
-      ip_hdr->ip_sum = cksum(ip_packet, sizeof(sr_ip_hdr_t));
-      
-      uint16_t length = 12 + ip_hdr->ip_len - sizeof(sr_ip_hdr_t);
-      uint8_t tcp = ip_protocol_tcp;
-      uint8_t zero8 = 0x0;
-      uint16_t zero16 = 0x00;
+      tcp_hdr->tcp_sum = 0;
+      tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
 
-      /*creates psuedo header for TCP and calculate*/
-      uint8_t* dummy = malloc(length);
-      memcpy(dummy, ip_packet+12, 4);
-      memcpy(dummy, ip_packet+16, 4);
-      memcpy(dummy, &zero8, 1);
-      memcpy(dummy, &tcp, 1);
-      memcpy(dummy, &length, 2);
-      memcpy(dummy, ip_packet+ip_hdr->ip_len, ip_hdr->ip_len - sizeof(sr_ip_hdr_t));
-      memcpy(ip_packet+sizeof(sr_ip_hdr_t)+16, &zero16, 2);
-      uint16_t checksum = cksum(dummy, 12 + ip_hdr->ip_len - sizeof(sr_ip_hdr_t));
-
-      memcpy(ip_packet+sizeof(sr_ip_hdr_t)+16, &checksum, 2);
-
-      free(dummy);
       free(map);
   }
   return 1;
@@ -304,7 +298,8 @@ struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote){
   
   struct sr_nat_connection *output = find_connection(map, ip_remote, aux_remote);
-  if(!output){
+
+  if (!output) {
     output = malloc(sizeof(struct sr_nat_connection));
     output->ip_ext = ip_ext;
     output->aux_ext = aux_ext;
@@ -313,22 +308,23 @@ struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping
     output->last_updated = time(NULL); 
     output->next = map->conns;
     map->conns = output;
-  }
-  else{/*update the current connection's last_updated field*/
+  } else {
+    /*update the current connection's last_updated field*/
     output->last_updated = time(NULL); 
   }
+
   return output;
 }
 
-struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, 
-  uint32_t ip_remote, uint16_t aux_remote){
+struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, uint32_t ip_remote, uint16_t aux_remote) {
   struct sr_nat_connection *conns_walker = map->conns;
-  while(conns_walker){
 
+  while (conns_walker) {
     if(conns_walker->ip_remote == ip_remote && conns_walker->aux_remote == aux_remote){
       return conns_walker;
     }
     conns_walker = conns_walker->next;
   }
+
   return NULL;
 }

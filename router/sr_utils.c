@@ -22,6 +22,20 @@ uint16_t cksum (const void *_data, int len) {
   return sum ? sum : 0xffff;
 }
 
+uint16_t tcp_cksum (uint8_t *ip_packet) {
+  struct sr_ip_hdr *ip_hdr = (sr_ip_hdr_t*)ip_packet;
+  uint8_t *tcp_segment = (uint8_t*)(ip_packet + sizeof(sr_ip_hdr_t));
+
+  uint16_t tcp_segment_len = ip_hdr->ip_len - sizeof(sr_ip_hdr_t); /* Size of the TCP Segment, not including pseudo header */
+
+  /*creates psuedo header for TCP and calculate*/
+  sr_object_t tcp_pseudo_hdr_wrapper = create_tcp_pseudo_hdr(ip_hdr->ip_src, ip_hdr->ip_dst, tcp_segment_len);
+  sr_object_t data = create_combined_packet(tcp_pseudo_hdr_wrapper.packet, tcp_pseudo_hdr_wrapper.len,
+    tcp_segment, tcp_segment_len);
+
+  return cksum(data.packet, data.len);
+}
+
 uint16_t ethertype(uint8_t *buf) {
   sr_ethernet_hdr_t *ehdr = (sr_ethernet_hdr_t *)buf;
   return ntohs(ehdr->ether_type);
@@ -112,6 +126,19 @@ sr_object_t create_ethernet_packet(uint8_t* ether_shost, uint8_t* ether_dhost, u
   output->ether_type = htons(ethertype);
 
   return create_combined_packet((uint8_t *) output, ethernet_hdr_size, data, len);
+}
+
+sr_object_t create_tcp_pseudo_hdr(uint32_t ip_src, uint32_t ip_dst, uint16_t tcp_length) {
+  unsigned int pseudo_hdr_size = sizeof(sr_tcp_pseudo_hdr_t);
+
+  sr_tcp_pseudo_hdr_t *output = malloc(pseudo_hdr_size);
+  output->ip_src = ip_src;
+  output->ip_dst = ip_dst;
+  output->reserved = TCP_PSEUDO_RF;
+  output->protocol = ip_protocol_tcp;
+  output->tcp_length = tcp_length;
+
+  return create_packet((uint8_t *)output, pseudo_hdr_size);
 }
 
 sr_object_t create_packet(uint8_t *packet, unsigned int len) {

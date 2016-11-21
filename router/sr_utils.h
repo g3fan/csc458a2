@@ -31,6 +31,7 @@
 struct sr_if;
 
 uint16_t cksum(const void *_data, int len);
+uint16_t tcp_cksum(uint8_t *ip_packet);
 uint16_t get_network_cksum_from_hardware_ip(uint8_t* ip_hdr, int len);
 uint16_t ethertype(uint8_t *buf);
 uint8_t ip_protocol(uint8_t *buf);
@@ -41,6 +42,7 @@ sr_object_t create_icmp_t3_packet(uint8_t icmp_type, uint8_t icmp_code, uint16_t
 sr_object_t create_ip_packet( uint8_t protocol, uint32_t ip_src, uint32_t ip_dst, uint8_t* data, unsigned int len);
 sr_object_t create_arp_response_hdr(struct sr_arp_hdr *arp_hdr, unsigned char *self_mac, uint32_t self_ip, unsigned char *target_mac, uint32_t target_ip);
 sr_object_t create_ethernet_packet(uint8_t* ether_shost, uint8_t* ether_dhost, uint16_t ethertype, uint8_t *data, unsigned int len);
+sr_object_t create_tcp_pseudo_hdr(uint32_t ip_src, uint32_t ip_dst, uint16_t tcp_length) ;
 
 sr_object_t create_packet(uint8_t *packet, unsigned int len);
 sr_object_t create_combined_packet(uint8_t *hdr, unsigned int hdr_len, uint8_t *data, unsigned int data_len);

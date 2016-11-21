@@ -88,7 +88,7 @@ void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */
 struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
-    uint16_t aux_ext, sr_nat_mapping_type type );
+  uint16_t aux_ext, sr_nat_mapping_type type );
 
 /* Get the mapping associated with given internal (ip, port) pair.
    You must free the returned structure if it is not NULL. */
@@ -101,11 +101,11 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
 
 /*added*/
-struct sr_nat_mapping* create_nat_mapping(struct sr_nat *nat,
+struct sr_nat_mapping *sr_nat_create_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
 
 struct sr_nat_mapping *sr_nat_lookup_external_nolock(struct sr_nat *nat,
-    uint16_t aux_ext, sr_nat_mapping_type type )
+  uint16_t aux_ext, sr_nat_mapping_type type );
 
 struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type );
@@ -116,7 +116,7 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int,
 /*I am assuming the ethernet and ip packets are in network order*/
 /* returns 1 for success, 0 means drop the packet*/
 /*this functions modifies the passed in pointers*/
-int nat_handle_interal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
+int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
 
 struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote);

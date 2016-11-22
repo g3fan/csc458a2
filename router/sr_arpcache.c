@@ -33,10 +33,7 @@ void sr_arpcache_sweepreqs(struct sr_instance *sr) {
     }
 }
 
-void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr){
-    
-    /*WARNING MAY NOT WORK IF THE FIRST PACKET in req->packets is EMPTY.8?*/
-
+void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
     /*this is a linked list of packets depending on the ARP request*/
     struct sr_packet *packet = req->packets;  
     time_t curtime = time(NULL);
@@ -65,7 +62,7 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr){
                 print_hdrs(packet->buf, packet->len);
                 struct sr_rt* targetRT;
 
-		uint32_t ip_dst;
+		        uint32_t ip_dst;
                 if(sr_is_packet_recipient(sr, currIPHdr->ip_src)){
                      fprintf(stderr, "we are reply\n");
                      targetRT = get_longest_prefix_match_interface(sr->routing_table, currIPHdr->ip_dst);
@@ -77,7 +74,7 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr){
                     ip_dst = currIPHdr->ip_src;
                 }
 
-
+                /* TODO: Handle case of NAT translations */
                 struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
 
                 sr_object_t sendICMPPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_1, 0, (uint8_t*)currIPHdr); 

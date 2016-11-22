@@ -24,6 +24,7 @@ uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* 
 
   /* CAREFUL MODIFYING CODE ABOVE THIS LINE! */
 
+  nat->is_active = 1;
   nat->mappings = NULL;
 
   /* Initialize any variables here */
@@ -38,8 +39,6 @@ uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* 
   nat->icmp_id_mapping = malloc(sizeof(struct sr_aux_ext_mapping_wrap));
   nat->icmp_id_mapping->current_aux = htons(START_ID);
   nat->icmp_id_mapping->mappings = NULL;
-
-  /*TODO: need to initialize external_if_ip and internal_if_ip*/
 
   return success;
 }

@@ -90,6 +90,7 @@ void sr_add_interface(struct sr_instance* sr, const char* name)
     if_walker = if_walker->next;
     strncpy(if_walker->name,name,sr_IFACE_NAMELEN);
     if_walker->next = 0;
+
 } /* -- sr_add_interface -- */ 
 
 /*--------------------------------------------------------------------- 
@@ -137,6 +138,15 @@ void sr_set_ether_ip(struct sr_instance* sr, uint32_t ip_nbo)
 
     /* -- copy address -- */
     if_walker->ip = ip_nbo;
+
+    /* Extra functionality to set up NAT external vs internal interfaces */
+    if (sr->nat->is_active) {
+        if (sr_is_interface_internal(if_walker)) {
+            sr->nat->internal_if_ip = if_walker->ip;
+        } else if (sr_is_interface_external(if_walker)) {
+            sr->nat->internal_if_ip = if_walker->ip;
+        }
+    }
 
 } /* -- sr_set_ether_ip -- */
 
@@ -192,3 +202,14 @@ void sr_print_if(struct sr_if* iface)
     Debug("\n");
     Debug("\tinet addr %s\n",inet_ntoa(ip_addr));
 } /* -- sr_print_if -- */
+
+
+/* Returns whether an interface is internal facing for NAT */
+int sr_is_interface_internal(struct sr_if* interface) {
+  return strcmp(internalInterface, interface->name) == 0;
+}
+
+/* Returns whether an interface is external facing for NAT */
+int sr_is_interface_external(struct sr_if* interface) {
+  return strcmp(externalInterface, interface->name) == 0;
+}

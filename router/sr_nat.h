@@ -58,6 +58,8 @@ struct sr_aux_ext_mapping {
 };
 
 struct sr_nat {
+  int is_active;
+
   /* threading */
   pthread_mutex_t lock;
   pthread_mutexattr_t attr;

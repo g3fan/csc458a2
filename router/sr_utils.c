@@ -180,9 +180,6 @@ struct sr_rt* get_longest_prefix_match_interface(struct sr_rt *routingTable, uin
 /*returns 1 for true, 0 for false*/
 /*check what the mask actually is*/
 int targetIPMatchesEntry(uint32_t entry, uint32_t mask, uint32_t target) {
-    /* uint32_t testMask = 0xFFFFFFFF; */
-    /*testMask = testMask << (32 - mask);*/
-
     if((entry & mask) == (target & mask)) {
         return 1;
     }

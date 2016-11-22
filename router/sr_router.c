@@ -30,7 +30,7 @@
  *
  *---------------------------------------------------------------------*/
 
-void sr_init(struct sr_instance* sr, struct sr_nat* nat)
+void sr_init(struct sr_instance* sr)
 {
     /* REQUIRES */
     assert(sr);
@@ -45,16 +45,6 @@ void sr_init(struct sr_instance* sr, struct sr_nat* nat)
     pthread_t thread;
 
     pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
-
-    sr->nat = nat;
-
-    if (nat != NULL) {
-      struct sr_if* interface = sr_get_interface(sr, externalInterface);
-      nat->external_if_ip = interface->ip;
-      interface = sr_get_interface(sr, internalInterface);
-      nat->internal_if_ip = interface->ip;
-    }
-    
     /* Add initialization code here! */
 } /* -- sr_init -- */
 
@@ -113,16 +103,20 @@ void sr_handlepacket(struct sr_instance* sr,
         if (sr_nat_is_packet_recipient(sr, incoming_interface, ip_packet)) {
           sr_handle_packet_reply(sr, ethernet_hdr, ip_packet);
         } else {
+          int forwardPacket = 1;
+
           /* Preprocess packets with the NAT if it is being used */
           if (sr->nat != NULL) {
-            if (sr_is_packet_src_internal(incoming_interface)) {
-              sr_nat_handle_internal(sr->nat, ethernet_hdr, ip_packet);
+            if (sr_is_interface_internal(incoming_interface)) {
+              forwardPacket = sr_nat_handle_internal(sr->nat, ethernet_hdr, ip_packet);
             } else {
               /* TODO: sr_nat_handle_external */
             }
           }
 
-          sr_handle_packet_forward(sr, ethernet_hdr, ip_packet);
+          if (forwardPacket) {
+            sr_handle_packet_forward(sr, ethernet_hdr, ip_packet);
+          }
         }
     }
     /* Check if we are recipient of the packet*/
@@ -363,10 +357,6 @@ struct sr_if *sr_copy_interface(struct sr_if *interface) {
   return interface_copy;
 }
 
-int sr_is_packet_src_internal(struct sr_if* interface) {
-  return strcmp(internalInterface, interface->name) != 0;
-}
-
 /* Helper function to determine if the router is the recipient of a packet while
    handling cases with NAT */
 int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, uint8_t *ip_packet) {
@@ -375,12 +365,15 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
   if (sr->nat != NULL && ip_hdr->ip_p == ip_protocol_icmp) {
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
 
-    /* Determine if a icmp packet from an external source is to the router or an internal source */
-    if (!sr_is_packet_src_internal(interface)) {
+    /* Packets from external sources to the router without a NAT mapping are determined to be
+       for the router */
+    if (sr_is_interface_external(interface)) {
       struct sr_nat_mapping *mapping = sr_nat_lookup_external(sr->nat, icmp_hdr->id, nat_mapping_icmp);
 
       if (mapping == NULL) {
-        return 1;
+        return sr_is_packet_recipient(sr, ip_hdr->ip_dst);
+      } else {
+        return 0;
       }
 
       free(mapping);

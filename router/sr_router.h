@@ -36,9 +36,6 @@
 struct sr_if;
 struct sr_rt;
 
-static const char internalInterface[] = "eth1";
-static const char externalInterface[] = "eth2";
-
 /* ----------------------------------------------------------------------------
  * struct sr_instance
  *
@@ -73,7 +70,7 @@ int sr_connect_to_server(struct sr_instance* ,unsigned short , char* );
 int sr_read_from_server(struct sr_instance* );
 
 /* -- sr_router.c -- */
-void sr_init(struct sr_instance*, struct sr_nat*);
+void sr_init(struct sr_instance*);
 void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
 
 void sr_handle_arp_request(struct sr_instance* sr, struct sr_ethernet_hdr *ethernet_hdr, struct sr_arp_hdr *arp_hdr, struct sr_if* self_interface);
@@ -94,7 +91,6 @@ uint8_t *sr_copy_icmp_packet(uint8_t *ip_packet, unsigned int ip_packet_len, uns
 struct sr_if *sr_copy_interface(struct sr_if *interface);
 
 /* -- NAT functions -- */
-int sr_is_packet_src_internal(struct sr_if* interface);
 int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if* interface, uint8_t *ip_packet);
 
 /* -- sr_if.c -- */

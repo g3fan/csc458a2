@@ -87,6 +87,9 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
           }
           curr_conn = curr_conn->next;
         }
+        if(!curr_map->conns){
+          timeout_mapping(nat, curr_map);
+        }
       }
     }
     pthread_mutex_unlock(&(nat->lock));

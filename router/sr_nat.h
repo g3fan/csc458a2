@@ -24,6 +24,11 @@ typedef enum {
   /* nat_mapping_udp, */
 } sr_nat_mapping_type;
 
+typedef enum{
+  tcp_established,
+  tcp_transitory
+} tcp_state;
+
 struct sr_nat_connection {
   /* add TCP connection state data members here */
   uint32_t ip_ext;
@@ -31,6 +36,7 @@ struct sr_nat_connection {
   uint32_t ip_remote;
   uint16_t aux_remote; 
   time_t last_updated; 
+  tcp_state current_state;
   struct sr_nat_connection *next;
 };
 
@@ -86,6 +92,11 @@ int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
 uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);     /* Initializes the nat */
 int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
 void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
+
+/* deletes connections from a nat connection struct*/
+void timeout_mapping(struct sr_nat* nat, struct sr_nat_mapping* map);
+int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connection);
+void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mapping* map);
 
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */

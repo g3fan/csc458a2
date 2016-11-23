@@ -43,6 +43,14 @@ uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* 
   return success;
 }
 
+void deleteConnections(struct sr_nat_connection* connections){
+  struct sr_nat_connection* temp;
+  while(connections)
+    temp = connections->next;
+    free(connections);
+    connections = temp;
+}
+
 
 int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
 
@@ -64,11 +72,84 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 
     time_t curtime = time(NULL);
 
-    /* handle periodic tasks here */
-
+    struct sr_nat_mapping* curr_map = nat->mappings;
+    while(curr_map){
+      if(curr_map->type == nat_mapping_icmp){
+        if(difftime(curtime, curr_map->last_updated) >= nat->icmp_query_timeout){
+          timeout_mapping(nat, curr_map);
+        }
+      }
+      else{/*timeout tcp connections*/
+        struct sr_nat_connection* curr_conn = curr_map->conns;
+        while(curr_conn){
+          if(tcp_connection_expired(nat, curr_conn)){
+            timeout_tcp_connections(curr_conn, curr_map);
+          }
+          curr_conn = curr_conn->next;
+        }
+      }
+    }
     pthread_mutex_unlock(&(nat->lock));
   }
   return NULL;
+}
+
+/*deletes mapping from the nat*/
+void timeout_mapping(struct sr_nat* nat, struct sr_nat_mapping* map){
+  if (nat->mappings == map){
+    nat->mappings = map->next;
+    free(map);
+  }
+  else{
+    struct sr_nat_mapping* curr_map = nat->mappings->next;
+    struct sr_nat_mapping* prev_map = nat->mappings;
+    while(curr_map){
+      if(curr_map == map){/* delete*/
+        prev_map->next = curr_map->next;
+        free(curr_map);
+        break;      
+      }
+      else{/* move on to next map*/
+        curr_map = curr_map->next;
+        prev_map = prev_map->next;
+      }
+    }
+  }
+}
+/*1 if tcp connection expired, 0 otherwise*/
+int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connection){
+  time_t curtime = time(NULL);
+  if(connection->current_state == tcp_established && 
+    difftime(curtime,connection->last_updated) >= nat->tcp_established_idle_timeout){
+    return 1;
+  }
+  else if(connection->current_state == tcp_transitory && 
+    difftime(curtime,connection->last_updated) >= nat->tcp_transitory_idle_timeout){
+    return 1;
+  }
+  return 0;
+}
+/*deletes tcp connections*/
+void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mapping* map){
+  if (map->conns == conn){
+    map->conns = conn->next;
+    free(conn);
+  }
+  else{
+    struct sr_nat_connection* curr_conn = map->conns->next;
+    struct sr_nat_connection* prev_conn = map->conns;
+    while(curr_conn){
+      if(curr_conn == conn){/* delete*/
+        prev_conn->next = curr_conn->next;
+        free(conn);
+        break;      
+      }
+      else{/* move on to next connection*/
+        curr_conn = curr_conn->next;
+        prev_conn = prev_conn->next;
+      }
+    }
+  }
 }
 
 

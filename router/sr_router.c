@@ -100,24 +100,11 @@ void sr_handlepacket(struct sr_instance* sr,
     uint8_t *ip_packet = sr_copy_ip_packet((uint8_t *) ethernet_hdr, ip_packet_len);
     /* Check if the received packet is valid, if not drop the packet*/
     if (sr_ip_packet_is_valid(ip_packet, ip_packet_len)) {
-        if (sr_nat_is_packet_recipient(sr, incoming_interface, ip_packet)) {
-          sr_handle_packet_reply(sr, ethernet_hdr, ip_packet);
-        } else {
-          int forwardPacket = 1;
-
-          /* Preprocess packets with the NAT if it is being used */
-          if (sr->nat != NULL) {
-            if (sr_is_interface_internal(incoming_interface)) {
-              forwardPacket = sr_nat_handle_internal(sr->nat, ethernet_hdr, ip_packet);
-            } else {
-              /* TODO: sr_nat_handle_external */
-            }
-          }
-
-          if (forwardPacket) {
-            sr_handle_packet_forward(sr, ethernet_hdr, ip_packet);
-          }
-        }
+      if (sr_nat_is_packet_recipient(sr, incoming_interface, ip_packet)) {
+        sr_handle_packet_reply(sr, ethernet_hdr, ip_packet);
+      } else {
+        sr_handle_packet_forward(sr, incoming_interface, ethernet_hdr, ip_packet);
+      }
     }
     /* Check if we are recipient of the packet*/
     free(ip_packet);
@@ -152,7 +139,7 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
 
   /* Return a port unreachable for UDP or TCP type packets through a icmp_t3_header*/
   if (ip_hdr->ip_p == ip_protocol_tcp || ip_hdr->ip_p == ip_protocol_udp) {
-    icmp_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, 0, ip_packet);
+    icmp_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, ip_packet);
   } else if (ip_hdr->ip_p == ip_protocol_icmp) {
     /* Return a echo reply for echo request*/
     unsigned int headers_size = sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_hdr_t);
@@ -169,7 +156,7 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
 
     /* Send destination unreachable if reply destination is not in the forwarding table */
     if (longestPrefixIPMatch == NULL) {
-      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, 0, ip_packet);
+      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, ip_packet);
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
 
       free(icmp_t3_wrapper.packet);
@@ -194,53 +181,81 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
   }
 }
 
-void sr_handle_packet_forward(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet) {
+void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_interface,
+  struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet) {
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
+  uint8_t *forwarding_packet = ip_packet;
+  sr_ip_hdr_t *forwarding_ip_hdr = (sr_ip_hdr_t *) forwarding_packet;
 
-  /* Initialize packet src/dest with 'reply' type values*/
-  struct sr_rt* icmp_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
+  /* Apply NAT to the packet if it is in use */
+  int forwardPacket = 1;
 
-  struct sr_if *icmp_outgoing_interface = sr_get_interface(sr, icmp_rt->interface);
-  uint32_t ip_src = icmp_outgoing_interface->ip;
+  if (sr->nat->is_active) {
+    uint8_t *nat_packet = malloc(ip_hdr->ip_len);
+    memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
+
+    if (sr_is_interface_internal(incoming_interface)) {
+      forwardPacket = sr_nat_handle_internal(sr->nat, ethernet_hdr, nat_packet);
+    } else {
+      /* TODO: sr_nat_handle_external */
+    }
+
+    if (!forwardPacket) {
+      free(nat_packet);
+      return;
+    }
+
+    forwarding_packet = nat_packet;
+  }
+
+  /* Initialize packet src/dest with 'reply' type values before NAT is applied as multiple cases involve sending back an
+     icmp packet to the original source */
+  struct sr_rt* reply_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
+  struct sr_if *reply_interface = sr_get_interface(sr, reply_rt->interface);
   uint32_t ip_dest = ip_hdr->ip_src;
+  uint32_t ip_src = reply_interface->ip;
   uint8_t* eth_src = ethernet_hdr->ether_dhost;
   uint8_t* eth_dest = ethernet_hdr->ether_shost;
-  unsigned int ip_hdr_size = sizeof(sr_ip_hdr_t);
-  unsigned int ip_packet_len = ntohs(ip_hdr->ip_len);
 
-  if (ip_hdr->ip_ttl <= 1) {
+  if (forwarding_ip_hdr->ip_ttl <= 1) {
     /* Send ICMP time exceeded*/
-    sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, 0, ip_packet);
+    sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, forwarding_packet);
 
     createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
   } else {
     /* Get the MAC address of next hub*/
-    struct sr_rt* longestPrefixIPMatch = get_longest_prefix_match_interface(sr->routing_table,ip_hdr->ip_dst);
-    struct sr_arpentry *arp_entry = sr_arpcache_lookup(&(sr->cache), ip_hdr->ip_dst);
+    struct sr_rt* longestPrefixIPMatch = get_longest_prefix_match_interface(sr->routing_table, forwarding_ip_hdr->ip_dst);
 
     /* Send ICMP network unreachable if the ip cannot be identified through our routing table */
     if (longestPrefixIPMatch == NULL) {
-      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, 0, ip_packet);
+      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, forwarding_packet);
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
     } else {
-    /* Update IP packet checksum */
-      ip_hdr->ip_ttl -= 1;
-      ip_hdr->ip_sum = 0;
-      ip_hdr->ip_sum = cksum(ip_packet, ip_hdr_size);
+      /* Check if the destination is in the arp cache */
+      struct sr_arpentry *arp_entry = sr_arpcache_lookup(&(sr->cache), forwarding_ip_hdr->ip_dst);
+      unsigned int ip_packet_len = ntohs(forwarding_ip_hdr->ip_len);
 
+      /* Decrement the TTL*/
+      increment_ttl(forwarding_packet, -1);
+    
       if (arp_entry == NULL) {
         /* Entry for ip_dst missing in cache table, queue the packet*/       
-        queue_ethernet_packet(sr, ip_packet, ip_packet_len, eth_dest);
+        queue_ethernet_packet(sr, forwarding_packet, ip_packet_len, eth_dest);
       } else {
         /* When forwarding to next-hop, only mac addresses change*/
         struct sr_if* outgoing_interface = sr_get_interface(sr, longestPrefixIPMatch->interface);
         eth_src = outgoing_interface->addr;
         eth_dest = arp_entry->mac;
 
-        sr_create_send_ethernet_packet(sr, eth_src, eth_dest, ethertype_ip, ip_packet, ip_packet_len);
+        sr_create_send_ethernet_packet(sr, eth_src, eth_dest, ethertype_ip, forwarding_packet, ip_packet_len);
       }
+      free(arp_entry);
     }
-    free(arp_entry);
+  }
+
+  /* Free the NAT packet if it is in use */
+  if (sr->nat->is_active) {
+    free(forwarding_packet);
   }
 }
 

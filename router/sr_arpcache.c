@@ -38,46 +38,43 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
     struct sr_packet *packet = req->packets;  
     time_t curtime = time(NULL);
 
-    if(difftime(curtime, req->sent) >= 1.0){
-        if(req->times_sent >= 5){
+    if (difftime(curtime, req->sent) >= 1.0) {
+        if (req->times_sent >= 5) {
             /*sent ICMP unreachable to all packets waiting on this ARPReq*/
-            while(packet != NULL){
+            while (packet != NULL) {
 
-                if(packet->len < sizeof(sr_ethernet_hdr_t)){
+                if (packet->len < sizeof(sr_ethernet_hdr_t)) {
                     fprintf(stderr, "Packet ignored due to length (short)\n");
                     packet = packet->next;
                     continue;
                 }
 
-                /* Ethernet header is in network order */
                 sr_ethernet_hdr_t* currEthHdr = (sr_ethernet_hdr_t*) packet->buf;
-                
-                /* IP Packet is in network order */
-                sr_ip_hdr_t* currIPHdr = (sr_ip_hdr_t*) &(packet->buf[sizeof(sr_ethernet_hdr_t)]);
+                uint8_t *ip_packet = (uint8_t *) (packet + sizeof(sr_ethernet_hdr_t));
+                sr_ip_hdr_t* currIPHdr = (sr_ip_hdr_t*) ip_packet;
 
-                /* Undo previous ttl decrement to make ip packet match that of the original */
-                currIPHdr->ip_ttl += 1;
-                currIPHdr->ip_sum = htons(0);
-                currIPHdr->ip_sum = cksum(currIPHdr, sizeof(sr_ip_hdr_t));
-                print_hdrs(packet->buf, packet->len);
-                struct sr_rt* targetRT;
+                /* Determine the destination to send the ICMP unreachable based on the packets original source */
+                uint32_t ip_dst;
+                uint32_t ip_src = currIPHdr->ip_src;
 
-		        uint32_t ip_dst;
-                if(sr_is_packet_recipient(sr, currIPHdr->ip_src)){
-                     fprintf(stderr, "we are reply\n");
-                     targetRT = get_longest_prefix_match_interface(sr->routing_table, currIPHdr->ip_dst);
-                     ip_dst = currIPHdr->ip_dst;
-                     /*we swap src and dst IPs here so the createIPheader works later on*/
+                /* Retrieve the original source ip of packets that may have undergone NAT */
+                if (sr->nat->is_active) {
+                    ip_src = get_nat_ip_src(sr->nat, ip_packet);
                 }
-                else{ fprintf(stderr, "we are forwarding\n");
-                    targetRT = get_longest_prefix_match_interface(sr->routing_table, currIPHdr->ip_src);
+
+                if (sr_is_packet_recipient(sr, ip_src)) {
+                    ip_dst = currIPHdr->ip_dst;
+                } else {
                     ip_dst = currIPHdr->ip_src;
                 }
 
-                /* TODO: Handle case of NAT translations */
+                struct sr_rt* targetRT = get_longest_prefix_match_interface(sr->routing_table, ip_dst);
                 struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
 
-                sr_object_t sendICMPPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_1, 0, (uint8_t*)currIPHdr); 
+                /* Undo previous ttl decrement to make ip packet match that of the original */
+                increment_ttl(ip_packet, 1);
+
+                sr_object_t sendICMPPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_1, ip_packet); 
                 sr_object_t sendIPHeader = create_ip_packet(ip_protocol_icmp, targetInterface->ip, ip_dst, sendICMPPacket.packet,
                                                                 sendICMPPacket.len);
                 sr_object_t sendEthernet = create_ethernet_packet( targetInterface->addr, currEthHdr->ether_dhost,
@@ -92,8 +89,7 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
                 free(sendICMPPacket.packet);
             }
             sr_arpreq_destroy(&sr->cache, req);
-        }
-        else{
+        } else {
             sr_ethernet_hdr_t* currEthHdr = (sr_ethernet_hdr_t*) packet->buf;
 
             struct sr_rt* rt;
@@ -108,15 +104,13 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
                 fprintf(stderr, "problem\n");
             }
 
-            uint8_t broadcastAddr[ETHER_ADDR_LEN]  = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-
             sr_object_t arp_packet;
-
+            uint8_t broadcastAddr[ETHER_ADDR_LEN]  = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
             arp_packet = create_ethernet_packet(sr_if->addr, broadcastAddr, ethertype_arp,(uint8_t*)newArpReq, sizeof(sr_arp_hdr_t));
 
             sr_send_packet(sr, arp_packet.packet, arp_packet.len, rt->interface);
             req->sent = time(NULL);
-	    req->times_sent++;
+	        req->times_sent++;
 
             free(newArpReq);
             free(arp_packet.packet);

@@ -1,11 +1,10 @@
-
 #include <signal.h>
 #include <assert.h>
 #include "sr_nat.h"
 #include <unistd.h>
 
 int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
-uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* Initializes the nat */
+  uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout) { /* Initializes the nat */
 
   assert(nat);
 
@@ -68,7 +67,7 @@ void handle_unsolicited_syn(struct sr_nat* nat, uint8_t* packet){
   pthread_create(&syn_thread, &syn_thread_attr, unsolicited_syn_thread, (void*)input);
 }
 
-void unsolicited_syn_thread(void* input){
+void *unsolicited_syn_thread(void* input) {
   struct thread_input* info = (struct thread_input*)input;
   
   struct sr_nat* nat = info->nat;
@@ -82,7 +81,7 @@ void unsolicited_syn_thread(void* input){
   
   int success = 0;
 
-  while(curr_map){
+  while (curr_map) {
     if(find_connection(curr_map, ip_hdr->ip_src, tcp_hdr->port_src)){
       /* do nothing, or maybe we do have to do something ?*/
       if(difftime(curr_map->time_created, curtime)<=6.0){
@@ -91,8 +90,9 @@ void unsolicited_syn_thread(void* input){
       break;
     }
   }
-  if(!success){/*send ICMP port unreachable*/
-    sr_object_t icmpPacket = create_icmp_t3_packet(icmp_code_3, 3, 0, packet);
+
+  if (!success) { /*send ICMP port unreachable*/
+    sr_object_t icmpPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, packet);
     sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat->external_if_ip, 
                                             ip_hdr->ip_src, icmpPacket.packet, icmpPacket.len);
       /*create ethernet packet and send it */
@@ -191,7 +191,7 @@ void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mappi
 }
 
 
-/* Get the mapping associated with given external port.
+/* Get the mapping associated with given external guid.
    You must free the returned structure if it is not NULL. */
 struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
     uint16_t aux_ext, sr_nat_mapping_type type ) {
@@ -233,7 +233,7 @@ struct sr_nat_mapping *sr_nat_lookup_external_nolock(struct sr_nat *nat,
 }
 
 
-/* Get the mapping associated with given internal (ip, port) pair.
+/* Get the mapping associated with given internal (ip, port/id) pair.
    You must free the returned structure if it is not NULL. */
 struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
@@ -352,6 +352,7 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
     map_walker = map_walker->next;
   }
 
+  /* TODO: Determine if the extra lists are needed  */
   /* If no mapping found, create mapping and assign the current available port/id */
   struct sr_aux_ext_mapping *new_mapping = malloc(sizeof(struct sr_aux_ext_mapping));
   new_mapping->ip_int = ip_int;
@@ -371,7 +372,7 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
   return new_mapping->aux_ext;
 }
 
-+/* Handle outbound packets
+/* Handle outbound packets
      A) ICMP:
        1. Insert NAT mapping
        2. Modify Packet:
@@ -392,7 +393,7 @@ int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_
 
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
 
-  if(ip_hdr->ip_p == ip_protocol_icmp){
+  if(ip_hdr->ip_p == ip_protocol_icmp) {
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
     /* Only need to handle echo requests from internal addresses */
@@ -481,7 +482,7 @@ int sr_nat_handle_external(struct sr_nat *nat, uint8_t *ip_packet) {
     struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);
     if (tcp_mapping) {
       
-      tcp_hdr->port_src = mapping->aux_int;
+      tcp_hdr->port_src = tcp_mapping->aux_int;
       tcp_hdr->tcp_sum = 0;
       tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
 
@@ -532,4 +533,46 @@ struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, uint32_t i
   }
 
   return NULL;
+}
+
+
+/* Returns the original source ip of a tcp or icmp packet */
+uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet) {
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)ip_packet;
+
+  if (!nat->is_active) {
+    return ip_hdr->ip_src;
+  }
+
+  struct sr_nat_mapping *mapping;
+  uint32_t nat_ip_src = ip_hdr->ip_src;
+  uint16_t aux_ext;
+  sr_nat_mapping_type type;
+
+  if (ip_hdr->ip_p == ip_protocol_tcp) {
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(ip_hdr + sizeof(sr_ip_hdr_t));
+    aux_ext = tcp_hdr->port_src;
+    type = nat_mapping_tcp;
+  } else {
+    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_hdr + sizeof(sr_ip_hdr_t));
+    aux_ext = icmp_hdr->id;
+    type = nat_mapping_icmp;
+  }
+
+  /* Check if we have an existing mapping based on the  */
+  if (ip_hdr->ip_src == nat->external_if_ip) {
+    mapping = sr_nat_lookup_external(nat, aux_ext, type);
+
+    if (mapping != NULL) {
+      nat_ip_src = mapping->ip_int;
+    }
+  } else {
+    mapping = sr_nat_lookup_internal(nat, ip_hdr->ip_src, aux_ext, type);
+
+    if (mapping != NULL) {
+      nat_ip_src = mapping->ip_ext;
+    }
+  }
+
+  return nat_ip_src;
 }

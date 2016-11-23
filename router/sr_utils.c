@@ -36,6 +36,14 @@ uint16_t tcp_cksum (uint8_t *ip_packet) {
   return cksum(data.packet, data.len);
 }
 
+void increment_ttl (uint8_t *ip_packet, int increment) {
+  struct sr_ip_hdr *ip_hdr = (sr_ip_hdr_t*)ip_packet;
+
+  ip_hdr->ip_ttl += increment;
+  ip_hdr->ip_sum = 0;
+  ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+}
+
 uint16_t ethertype(uint8_t *buf) {
   sr_ethernet_hdr_t *ehdr = (sr_ethernet_hdr_t *)buf;
   return ntohs(ehdr->ether_type);
@@ -61,13 +69,13 @@ sr_object_t create_icmp_packet(uint8_t type, uint8_t code, uint8_t* data, unsign
   return combined_packet;
 }
 
-sr_object_t create_icmp_t3_packet(uint8_t icmp_type, uint8_t icmp_code, uint16_t next_mtu, uint8_t* ip_packet) {
+sr_object_t create_icmp_t3_packet(uint8_t icmp_type, uint8_t icmp_code, uint8_t* ip_packet) {
   /* Create ICMP type 3 header */
   unsigned int icmp_t3_hdr_size = sizeof(sr_icmp_t3_hdr_t);
   struct sr_icmp_t3_hdr* icmp_t3_hdr = malloc(icmp_t3_hdr_size);
   icmp_t3_hdr->icmp_type = icmp_type;
   icmp_t3_hdr->icmp_code = icmp_code;
-  icmp_t3_hdr->next_mtu = htons(next_mtu);
+  icmp_t3_hdr->next_mtu = htons(0);
   icmp_t3_hdr->icmp_sum = htons(0);
   icmp_t3_hdr->unused = htons(0);
 

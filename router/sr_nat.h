@@ -114,7 +114,7 @@ void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mappi
 void handle_unsolicited_syn(struct sr_nat* nat, uint8_t* packet);
 
 /*thread that gets spawned to deal with unsolicited syn*/
-void unsolicited_syn_thread(void* input);
+void *unsolicited_syn_thread(void* input);
 
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */
@@ -148,11 +148,13 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int,
 /* returns 1 for success, 0 means drop the packet*/
 /*this functions modifies the passed in pointers*/
 int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
-int sr_nat_handle_external(struct sr_nat *nat, uint8_t *ip_packet)
+int sr_nat_handle_external(struct sr_nat *nat, uint8_t *ip_packet);
 
 struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote);
 
 struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, 
   uint32_t ip_remote, uint16_t aux_remote);
+
+uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet);
 #endif

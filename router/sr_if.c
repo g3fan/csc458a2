@@ -144,7 +144,7 @@ void sr_set_ether_ip(struct sr_instance* sr, uint32_t ip_nbo)
         if (sr_is_interface_internal(if_walker)) {
             sr->nat->internal_if_ip = if_walker->ip;
         } else if (sr_is_interface_external(if_walker)) {
-            sr->nat->internal_if_ip = if_walker->ip;
+            sr->nat->external_if_ip = if_walker->ip;
         }
     }
 

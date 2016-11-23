@@ -75,7 +75,7 @@ void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
 
 void sr_handle_arp_request(struct sr_instance* sr, struct sr_ethernet_hdr *ethernet_hdr, struct sr_arp_hdr *arp_hdr, struct sr_if* self_interface);
 void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethernet_hdr, uint8_t *ip_packet);
-void sr_handle_packet_forward(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
+void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_interface, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
 
 int sr_is_packet_recipient(struct sr_instance *sr, uint32_t ip);
 int sr_ip_packet_is_valid(uint8_t *ip_packet, unsigned int ip_packet_len);

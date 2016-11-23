@@ -46,6 +46,7 @@ struct sr_nat_mapping {
   uint32_t ip_ext; /* external ip addr */
   uint16_t aux_int; /* internal port or icmp id */
   uint16_t aux_ext; /* external port or icmp id */
+  time_t time_created;
   time_t last_updated; /* use to timeout mappings */
   struct sr_nat_connection *conns; /* list of connections. null for ICMP */
   struct sr_nat_mapping *next;
@@ -88,6 +89,11 @@ struct sr_nat {
   struct sr_aux_ext_mapping_wrap *icmp_id_mapping;
 };
 
+struct thread_input{
+  struct sr_nat* nat;
+  uint8_t* packet;
+};
+
 int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
 uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);     /* Initializes the nat */
 int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
@@ -95,8 +101,20 @@ void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
 
 /* deletes connections from a nat connection struct*/
 void timeout_mapping(struct sr_nat* nat, struct sr_nat_mapping* map);
+
+/* check if tcp connectino expired*/
 int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connection);
+
+/*delete tcp connection from mapping*/
 void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mapping* map);
+
+
+/*checks if we get a syn packet in 6 seconds, and sends ICMP port unreachable otherwise*/
+/*input packet should include tcp header*/
+void handle_unsolicited_syn(struct sr_nat* nat, uint8_t* packet);
+
+/*thread that gets spawned to deal with unsolicited syn*/
+void unsolicited_syn_thread(void* input);
 
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */

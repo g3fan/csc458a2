@@ -43,15 +43,6 @@ uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout){ /* 
   return success;
 }
 
-void deleteConnections(struct sr_nat_connection* connections){
-  struct sr_nat_connection* temp;
-  while(connections)
-    temp = connections->next;
-    free(connections);
-    connections = temp;
-}
-
-
 int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
 
   pthread_mutex_lock(&(nat->lock));
@@ -62,6 +53,50 @@ int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
   return pthread_mutex_destroy(&(nat->lock)) &&
     pthread_mutexattr_destroy(&(nat->attr));
 
+}
+
+void handle_unsolicited_syn(struct sr_nat* nat, uint8_t* packet){
+  pthread_t  syn_thread;
+  pthread_attr_t syn_thread_attr;
+  pthread_attr_init(&syn_thread_attr);
+  pthread_attr_setdetachstate(&syn_thread_attr , PTHREAD_CREATE_DETACHED);
+
+  struct thread_input* input = malloc(sizeof(struct thread_input));
+  input->nat = nat;
+  input->packet = packet;
+
+  pthread_create(&syn_thread, &syn_thread_attr, unsolicited_syn_thread, (void*)input);
+}
+
+void unsolicited_syn_thread(void* input){
+  struct thread_input* info = (struct thread_input*)input;
+  
+  struct sr_nat* nat = info->nat;
+  uint8_t* packet = info->packet;
+  struct sr_ip_hdr* ip_hdr = (struct sr_ip_hdr*) packet;
+  struct sr_tcp_hdr* tcp_hdr = (struct sr_tcp_hdr*) packet+sizeof(struct sr_ip_hdr);
+
+  time_t curtime = time(NULL);
+  sleep(6.0);
+  struct sr_nat_mapping* curr_map = nat->mappings;
+  
+  int success = 0;
+
+  while(curr_map){
+    if(find_connection(curr_map, ip_hdr->ip_src, tcp_hdr->port_src)){
+      /* do nothing, or maybe we do have to do something ?*/
+      if(difftime(curr_map->time_created, curtime)<=6.0){
+        success = 1;
+      }
+      break;
+    }
+  }
+  if(!success){/*send ICMP port unreachable*/
+    sr_object_t icmpPacket = create_icmp_t3_packet(icmp_code_3, 3, 0, packet);
+    sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat->external_if_ip, 
+                                            ip_hdr->ip_src, icmpPacket.packet, icmpPacket.len);
+      /*create ethernet packet and send it */
+  }
 }
 
 void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */

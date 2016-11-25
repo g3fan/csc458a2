@@ -415,6 +415,7 @@ void *unsolicited_syn_thread(void* input) {
   struct thread_input* info = (struct thread_input*)input;
   
   struct sr_nat* nat = info->sr->nat;
+  struct sr_instance* sr = info->sr;
   uint8_t* packet = info->packet;
   struct sr_ip_hdr* ip_hdr = (struct sr_ip_hdr*) packet;
   struct sr_tcp_hdr* tcp_hdr = (struct sr_tcp_hdr*) packet+sizeof(struct sr_ip_hdr);
@@ -436,11 +437,22 @@ void *unsolicited_syn_thread(void* input) {
   }
 
   if (!success) { /*send ICMP port unreachable*/
+
+    struct sr_rt* targetRT = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
+    struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
+
     sr_object_t icmpPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, packet);
     sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat->external_if_ip, 
                                             ip_hdr->ip_src, icmpPacket.packet, icmpPacket.len);
-      /*create ethernet packet and send it */
+    
+    struct sr_if* source_interface = sr_get_interface(sr, externalInterface);
+
+    sr_object_t sendEthernet = create_ethernet_packet( targetInterface->addr, (uint8_t*)source_interface->addr,
+                                                                    ethertype_ip, IPPacket.packet, IPPacket.len);
+                  
+    sr_send_packet(sr, sendEthernet.packet, sendEthernet.len, targetInterface->name);
   }
+  return 0;
 }
 
 /* Handle outbound packets

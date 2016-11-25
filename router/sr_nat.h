@@ -89,11 +89,6 @@ struct sr_nat {
   struct sr_aux_ext_mapping_wrap *icmp_id_mapping;
 };
 
-struct thread_input{
-  struct sr_nat* nat;
-  uint8_t* packet;
-};
-
 int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
 uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);     /* Initializes the nat */
 int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
@@ -107,14 +102,6 @@ int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connec
 
 /*delete tcp connection from mapping*/
 void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mapping* map);
-
-
-/*checks if we get a syn packet in 6 seconds, and sends ICMP port unreachable otherwise*/
-/*input packet should include tcp header*/
-void handle_unsolicited_syn(struct sr_nat* nat, uint8_t* packet);
-
-/*thread that gets spawned to deal with unsolicited syn*/
-void *unsolicited_syn_thread(void* input);
 
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */
@@ -143,12 +130,6 @@ struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
 
 uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, 
   uint16_t aux_int, sr_nat_mapping_type type);
-
-/*I am assuming the ethernet and ip packets are in network order*/
-/* returns 1 for success, 0 means drop the packet*/
-/*this functions modifies the passed in pointers*/
-int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet);
-int sr_nat_handle_external(struct sr_nat *nat, uint8_t *ip_packet);
 
 struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote);

@@ -13,6 +13,7 @@
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "sr_protocol.h"
 #include "sr_arpcache.h"
@@ -61,6 +62,11 @@ struct sr_instance
     FILE* logfile;
 };
 
+struct thread_input{
+  struct sr_instance* sr;
+  uint8_t* packet;
+};
+
 /* -- sr_main.c -- */
 int sr_verify_routing_table(struct sr_instance* sr);
 
@@ -92,6 +98,19 @@ struct sr_if *sr_copy_interface(struct sr_if *interface);
 
 /* -- NAT functions -- */
 int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if* interface, uint8_t *ip_packet);
+
+/*checks if we get a syn packet in 6 seconds, and sends ICMP port unreachable otherwise*/
+/*input packet should include tcp header*/
+void handle_unsolicited_syn(struct sr_instance* sr, uint8_t* packet);
+
+/*thread that gets spawned to deal with unsolicited syn*/
+void *unsolicited_syn_thread(void* input);
+
+/*I am assuming the ethernet and ip packets are in network order*/
+/* returns 1 for success, 0 means drop the packet*/
+/*this functions modifies the passed in pointers*/
+int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet);
+int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet);
 
 /* -- sr_if.c -- */
 void sr_add_interface(struct sr_instance* , const char* );

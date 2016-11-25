@@ -195,7 +195,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
     memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
 
     if (sr_is_interface_internal(incoming_interface)) {
-      forwardPacket = sr_nat_handle_internal(sr->nat, ethernet_hdr, nat_packet);
+      forwardPacket = sr_nat_handle_internal(sr, nat_packet);
     } else {
       /* TODO: sr_nat_handle_external */
     }
@@ -396,4 +396,178 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
   }
 
   return sr_is_packet_recipient(sr, ip_hdr->ip_dst);
+}
+
+void handle_unsolicited_syn(struct sr_instance* sr, uint8_t* packet){
+  pthread_t  syn_thread;
+  pthread_attr_t syn_thread_attr;
+  pthread_attr_init(&syn_thread_attr);
+  pthread_attr_setdetachstate(&syn_thread_attr , PTHREAD_CREATE_DETACHED);
+
+  struct thread_input* input = malloc(sizeof(struct thread_input));
+  input->sr = sr;
+  input->packet = packet;
+
+  pthread_create(&syn_thread, &syn_thread_attr, unsolicited_syn_thread, (void*)input);
+}
+
+void *unsolicited_syn_thread(void* input) {
+  struct thread_input* info = (struct thread_input*)input;
+  
+  struct sr_nat* nat = info->sr->nat;
+  uint8_t* packet = info->packet;
+  struct sr_ip_hdr* ip_hdr = (struct sr_ip_hdr*) packet;
+  struct sr_tcp_hdr* tcp_hdr = (struct sr_tcp_hdr*) packet+sizeof(struct sr_ip_hdr);
+
+  time_t curtime = time(NULL);
+  sleep(6.0);
+  struct sr_nat_mapping* curr_map = nat->mappings;
+  
+  int success = 0;
+
+  while (curr_map) {
+    if(find_connection(curr_map, ip_hdr->ip_src, tcp_hdr->port_src)){
+      /* do nothing, or maybe we do have to do something ?*/
+      if(difftime(curr_map->time_created, curtime)<=6.0){
+        success = 1;
+      }
+      break;
+    }
+  }
+
+  if (!success) { /*send ICMP port unreachable*/
+    sr_object_t icmpPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, packet);
+    sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat->external_if_ip, 
+                                            ip_hdr->ip_src, icmpPacket.packet, icmpPacket.len);
+      /*create ethernet packet and send it */
+  }
+}
+
+/* Handle outbound packets
+     A) ICMP:
+       1. Insert NAT mapping
+       2. Modify Packet:
+         1) Internal ICMP ID -> External ICMP ID
+         2) Internal source IP -> External source IP
+         3) Recompute checksum of ICMP header and IP header
+     B) TCP:
+       1. Insert NAT mapping
+       2. Modify Packet:
+         1) Internal TCP port -> External TCP port
+         2) Internal source IP -> External source IP
+         3) Recompute checksum of TCP and IP
+         4) Update connection state based on tcp flags
+
+    TODO: handle TCP connection state update */
+int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
+  struct sr_nat* nat = sr->nat;
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
+
+  if(ip_hdr->ip_p == ip_protocol_udp) return 0;
+
+  if(ip_hdr->ip_p == ip_protocol_icmp) {
+    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
+
+    /* Only need to handle echo requests from internal addresses */
+    if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
+      struct sr_nat_mapping *icmp_mapping = icmp_mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src,
+        icmp_hdr->id, nat_mapping_icmp);
+
+      icmp_hdr->id = icmp_mapping->aux_ext;
+      icmp_hdr->icmp_sum = 0;
+      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
+
+      ip_hdr->ip_src = icmp_mapping->ip_ext;
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
+
+      free(icmp_mapping);
+    }
+  } else {
+      sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+
+      /* Initialize the tcp mapping and connections and apply it to the packet */
+      struct sr_nat_mapping *mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src, tcp_hdr->port_src, nat_mapping_tcp);
+      create_and_insert_nat_connection(mapping, ip_hdr->ip_dst, tcp_hdr->port_dst, mapping->ip_ext, mapping->aux_ext);
+
+      /* Recalculate checksums */
+      tcp_hdr->port_src = mapping->aux_ext;
+      tcp_hdr->tcp_sum = 0;
+      tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
+
+      ip_hdr->ip_src = mapping->ip_ext;
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+
+      free(mapping);
+  }
+  return 1;
+}
+
+
+/* Handle inbound packets
+    A) ICMP:
+      1. Check NAT mapping, if found:
+        1) External ICMP ID -> Internal ICMP ID
+        2) External source IP -> Internal source IP
+        3) Recompute checksum of ICMP header and IP header
+      2. If mapping not found:
+        1) Drop it
+    B) TCP:
+      1. Check NAT mapping, if found:  
+        1) External TCP port -> Internal TCP port
+        2) External source IP -> Internal source IP
+        3) Recompute checksum of TCP and IP
+        4) Update connection state based on tcp flags 
+      2. If mapping not found:
+        1) Call handle_unsolicited_syn 
+
+   TODO: handle TCP connection state update */
+int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
+  struct sr_nat* nat = sr->nat;
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
+
+  if(ip_hdr->ip_p == ip_protocol_udp) return 0;
+
+  if(ip_hdr->ip_p == ip_protocol_icmp){
+    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
+
+    /* Only need to handle echo requests from internal addresses */
+    if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
+
+      struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
+      if (!icmp_mapping) return 0;
+
+      icmp_hdr->id = icmp_mapping->aux_int;
+      icmp_hdr->icmp_sum = 0;
+      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
+
+      ip_hdr->ip_src = icmp_mapping->ip_int;
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
+
+      free(icmp_mapping);
+    }
+  } else {
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+
+    /* Lookup for TCP packet */
+    struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);
+    if (tcp_mapping) {
+      
+      tcp_hdr->port_src = tcp_mapping->aux_int;
+      tcp_hdr->tcp_sum = 0;
+      tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
+
+      ip_hdr->ip_src = tcp_mapping->ip_int;
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
+
+      free(tcp_mapping);
+    } else {
+      if (tcp_hdr->syn) handle_unsolicited_syn(sr, ip_packet);
+      return 0;
+    }
+  }
+  return 1;
 }

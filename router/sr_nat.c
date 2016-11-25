@@ -371,7 +371,22 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
   return new_mapping->aux_ext;
 }
 
++/* Handle outbound packets
+     A) ICMP:
+       1. Insert NAT mapping
+       2. Modify Packet:
+         1) Internal ICMP ID -> External ICMP ID
+         2) Internal source IP -> External source IP
+         3) Recompute checksum of ICMP header and IP header
+     B) TCP:
+       1. Insert NAT mapping
+       2. Modify Packet:
+         1) Internal TCP port -> External TCP port
+         2) Internal source IP -> External source IP
+         3) Recompute checksum of TCP and IP
+         4) Update connection state based on tcp flags
 
+    TODO: handle TCP connection state update */
 int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet){
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
 
@@ -386,10 +401,12 @@ int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_
         icmp_hdr->id, nat_mapping_icmp);
 
       icmp_hdr->id = icmp_mapping->aux_ext;
+      icmp_hdr->icmp_sum = 0;
+      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
 
       ip_hdr->ip_src = icmp_mapping->ip_ext;
       ip_hdr->ip_sum = 0;
-      ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
 
       free(icmp_mapping);
     }
@@ -413,6 +430,74 @@ int sr_nat_handle_internal(struct sr_nat *nat, struct sr_ethernet_hdr *ethernet_
   }
   return 1;
 }
+
+
+/* Handle inbound packets
+    A) ICMP:
+      1. Check NAT mapping, if found:
+        1) External ICMP ID -> Internal ICMP ID
+        2) External source IP -> Internal source IP
+        3) Recompute checksum of ICMP header and IP header
+      2. If mapping not found:
+        1) Drop it
+    B) TCP:
+      1. Check NAT mapping, if found:  
+        1) External TCP port -> Internal TCP port
+        2) External source IP -> Internal source IP
+        3) Recompute checksum of TCP and IP
+        4) Update connection state based on tcp flags 
+      2. If mapping not found:
+        1) Call handle_unsolicited_syn 
+
+   TODO: handle TCP connection state update */
+int sr_nat_handle_external(struct sr_nat *nat, uint8_t *ip_packet) {
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
+
+  if(ip_hdr->ip_p == ip_protocol_udp) return 0;
+
+  if(ip_hdr->ip_p == ip_protocol_icmp){
+    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
+
+    /* Only need to handle echo requests from internal addresses */
+    if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
+
+      struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
+      if (!icmp_mapping) return 0;
+
+      icmp_hdr->id = icmp_mapping->aux_int;
+      icmp_hdr->icmp_sum = 0;
+      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
+
+      ip_hdr->ip_src = icmp_mapping->ip_int;
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
+
+      free(icmp_mapping);
+    }
+  } else {
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+
+    /* Lookup for TCP packet */
+    struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);
+    if (tcp_mapping) {
+      
+      tcp_hdr->port_src = mapping->aux_int;
+      tcp_hdr->tcp_sum = 0;
+      tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
+
+      ip_hdr->ip_src = tcp_mapping->ip_int;
+      ip_hdr->ip_sum = 0;
+      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
+
+      free(tcp_mapping);
+    } else {
+      if (tcp_hdr->syn) handle_unsolicited_syn(nat, ip_packet);
+      return 0;
+    }
+  }
+  return 1;
+}
+
 
 struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote){

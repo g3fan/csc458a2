@@ -498,7 +498,7 @@ int sr_nat_handle_external(struct sr_nat *nat, uint8_t *ip_packet) {
   return 1;
 }
 
-
+/* TODO: Need to update the actual nat table, not a copy of mapping, acquire lock when modifying */
 struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote){
   

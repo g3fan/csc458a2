@@ -50,7 +50,7 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
                 }
 
                 sr_ethernet_hdr_t* currEthHdr = (sr_ethernet_hdr_t*) packet->buf;
-                uint8_t *ip_packet = (uint8_t *) (packet + sizeof(sr_ethernet_hdr_t));
+                uint8_t *ip_packet = packet->buf + sizeof(sr_ethernet_hdr_t);
                 sr_ip_hdr_t* currIPHdr = (sr_ip_hdr_t*) ip_packet;
 
                 /* Determine the destination to send the ICMP unreachable based on the packets original source */

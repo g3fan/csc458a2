@@ -40,7 +40,7 @@ void increment_ttl (uint8_t *ip_packet, int increment) {
   struct sr_ip_hdr *ip_hdr = (sr_ip_hdr_t*)ip_packet;
 
   ip_hdr->ip_ttl += increment;
-  ip_hdr->ip_sum = 0;
+  ip_hdr->ip_sum = htons(0);
   ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
 }
 

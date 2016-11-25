@@ -66,46 +66,48 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
     while(curr_map){
       if(curr_map->type == nat_mapping_icmp){
         if(difftime(curtime, curr_map->last_updated) >= nat->icmp_query_timeout){
-          timeout_mapping(nat, curr_map);
+          curr_map->marked_for_delete = 1;
         }
       }
       else{/*timeout tcp connections*/
         struct sr_nat_connection* curr_conn = curr_map->conns;
         while(curr_conn){
           if(tcp_connection_expired(nat, curr_conn)){
-            timeout_tcp_connections(curr_conn, curr_map);
+            curr_conn->marked_for_delete = 1;
           }
           curr_conn = curr_conn->next;
         }
+        timeout_tcp_connections(curr_map);
         if(!curr_map->conns){
-          timeout_mapping(nat, curr_map);
+          curr_map->marked_for_delete = 1;
         }
       }
     }
+    timeout_mapping(nat);
     pthread_mutex_unlock(&(nat->lock));
   }
   return NULL;
 }
 
 /*deletes mapping from the nat*/
-void timeout_mapping(struct sr_nat* nat, struct sr_nat_mapping* map){
-  if (nat->mappings == map){
-    nat->mappings = map->next;
-    free(map);
-  }
-  else{
-    struct sr_nat_mapping* curr_map = nat->mappings->next;
-    struct sr_nat_mapping* prev_map = nat->mappings;
-    while(curr_map){
-      if(curr_map == map){/* delete*/
-        prev_map->next = curr_map->next;
-        free(curr_map);
-        break;      
-      }
-      else{/* move on to next map*/
+void timeout_mapping(struct sr_nat* nat){
+  struct sr_nat_mapping* curr_map = nat->mappings;
+  struct sr_nat_mapping* prev_map = NULL;
+  while(curr_map){
+    if(curr_map->marked_for_delete){
+      if(!prev_map){
         curr_map = curr_map->next;
-        prev_map = prev_map->next;
+        nat->mappings = curr_map;
       }
+      else{
+        curr_map = curr_map->next;
+        prev_map->next = curr_map;
+      }
+      free(curr_map);
+    }
+    else{
+      prev_map = curr_map;
+      curr_map = curr_map->next;
     }
   }
 }
@@ -123,24 +125,25 @@ int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connec
   return 0;
 }
 /*deletes tcp connections*/
-void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mapping* map){
-  if (map->conns == conn){
-    map->conns = conn->next;
-    free(conn);
-  }
-  else{
-    struct sr_nat_connection* curr_conn = map->conns->next;
-    struct sr_nat_connection* prev_conn = map->conns;
-    while(curr_conn){
-      if(curr_conn == conn){/* delete*/
-        prev_conn->next = curr_conn->next;
-        free(conn);
-        break;      
-      }
-      else{/* move on to next connection*/
+void timeout_tcp_connections(struct sr_nat_mapping* map){
+
+  struct sr_nat_connection* curr_conn = map->conns;
+  struct sr_nat_connection* prev_conn = NULL;
+  while(curr_conn){
+    if(curr_conn->marked_for_delete){
+      if(!prev_conn){
         curr_conn = curr_conn->next;
-        prev_conn = prev_conn->next;
+        map->conns = curr_conn;
       }
+      else{
+        curr_conn = curr_conn->next;
+        prev_conn->next = curr_conn;
+      }
+      free(curr_conn);
+    }
+    else{
+      prev_conn = curr_conn;
+      curr_conn = curr_conn->next;
     }
   }
 }
@@ -271,6 +274,7 @@ struct sr_nat_mapping *sr_nat_create_mapping(struct sr_nat *nat,
   newmap->last_updated = time(NULL);
   newmap->conns = NULL;
   newmap->next = NULL;
+  newmap->marked_for_delete = 0;
   return newmap;
 }
 
@@ -341,6 +345,7 @@ struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping
     output->aux_remote = aux_remote; 
     output->last_updated = time(NULL); 
     output->next = map->conns;
+    output->marked_for_delete = 0;
     map->conns = output;
   } else {
     /*update the current connection's last_updated field*/

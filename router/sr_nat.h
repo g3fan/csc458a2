@@ -37,6 +37,7 @@ struct sr_nat_connection {
   uint16_t aux_remote; 
   time_t last_updated; 
   tcp_state current_state;
+  int marked_for_delete;/*1 for delete 0 otherwise*/
   struct sr_nat_connection *next;
 };
 
@@ -48,6 +49,7 @@ struct sr_nat_mapping {
   uint16_t aux_ext; /* external port or icmp id */
   time_t time_created;
   time_t last_updated; /* use to timeout mappings */
+  int marked_for_delete;/*1 for delete 0 otherwise*/
   struct sr_nat_connection *conns; /* list of connections. null for ICMP */
   struct sr_nat_mapping *next;
 };
@@ -95,13 +97,12 @@ int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
 void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
 
 /* deletes connections from a nat connection struct*/
-void timeout_mapping(struct sr_nat* nat, struct sr_nat_mapping* map);
-
+void timeout_mapping(struct sr_nat* nat);
 /* check if tcp connectino expired*/
 int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connection);
 
 /*delete tcp connection from mapping*/
-void timeout_tcp_connections(struct sr_nat_connection* conn, struct sr_nat_mapping* map);
+void timeout_tcp_connections(struct sr_nat_mapping* map);
 
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */

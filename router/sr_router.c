@@ -186,10 +186,18 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
   uint8_t *forwarding_packet = ip_packet;
 
-  /* Apply NAT to the packet if it is in use */
-  int forwardPacket = 1;
+  /* Initialize packet src/dest with 'reply' type values before NAT is applied as multiple cases involve sending back an
+     icmp packet to the original source */
+  struct sr_rt* reply_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
+  struct sr_if *reply_interface = sr_get_interface(sr, reply_rt->interface);
+  uint32_t ip_dest = ip_hdr->ip_src;
+  uint32_t ip_src = reply_interface->ip;
+  uint8_t* eth_src = ethernet_hdr->ether_dhost;
+  uint8_t* eth_dest = ethernet_hdr->ether_shost;
 
-  if (sr->nat->is_active) {
+  /* Apply NAT to the packet if it is in use */
+  if (sr->nat->is_active && ip_hdr->ip_ttl > 1) {
+    int forwardPacket = 1;
     uint8_t *nat_packet = malloc(ip_hdr->ip_len);
     memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
 
@@ -207,19 +215,11 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
     forwarding_packet = nat_packet;
   }
 
-  /* Initialize packet src/dest with 'reply' type values before NAT is applied as multiple cases involve sending back an
-     icmp packet to the original source */
   sr_ip_hdr_t *forwarding_ip_hdr = (sr_ip_hdr_t *) forwarding_packet;
-  struct sr_rt* reply_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
-  struct sr_if *reply_interface = sr_get_interface(sr, reply_rt->interface);
-  uint32_t ip_dest = ip_hdr->ip_src;
-  uint32_t ip_src = reply_interface->ip;
-  uint8_t* eth_src = ethernet_hdr->ether_dhost;
-  uint8_t* eth_dest = ethernet_hdr->ether_shost;
 
-  if (forwarding_ip_hdr->ip_ttl <= 1) {
+  if (ip_hdr->ip_ttl <= 1) {
     /* Send ICMP time exceeded*/
-    sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, forwarding_packet);
+    sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, ip_packet);
 
     createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
   } else {
@@ -228,7 +228,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
 
     /* Send ICMP network unreachable if the ip cannot be identified through our routing table */
     if (longestPrefixIPMatch == NULL) {
-      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, forwarding_packet);
+      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, ip_packet);
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
     } else {
       /* Check if the destination is in the arp cache */

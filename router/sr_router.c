@@ -472,10 +472,11 @@ void *unsolicited_syn_thread(void* input) {
 
     TODO: handle TCP connection state update */
 int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
-  struct sr_nat* nat = sr->nat;
+  
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
-
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
+
+  struct sr_nat* nat = sr->nat;
 
   if(ip_hdr->ip_p == ip_protocol_icmp) {
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
@@ -500,7 +501,7 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
 
       /* Initialize the tcp mapping and connections and apply it to the packet */
       struct sr_nat_mapping *mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src, tcp_hdr->port_src, nat_mapping_tcp);
-      create_and_insert_nat_connection(mapping, ip_hdr->ip_dst, tcp_hdr->port_dst, mapping->ip_ext, mapping->aux_ext);
+      update_tcp_connection_internal(nat, ip_hdr, tcp_hdr);
 
       /* Recalculate checksums */
       tcp_hdr->port_src = mapping->aux_ext;
@@ -566,6 +567,7 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
     /* Lookup for TCP packet */
     struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);
     if (tcp_mapping) {
+      update_tcp_connection_internal(nat, ip_hdr, tcp_hdr);
       
       tcp_hdr->port_src = tcp_mapping->aux_int;
       tcp_hdr->tcp_sum = 0;

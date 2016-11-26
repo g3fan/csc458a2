@@ -3,6 +3,13 @@
 #include "sr_nat.h"
 #include <unistd.h>
 
+#define IS_URG(flags) ((flags) & (tcp_flag_urg))
+#define IS_ACK(flags) ((flags) & (tcp_flag_ack))
+#define IS_PSH(flags) ((flags) & (tcp_flag_psh))
+#define IS_RST(flags) ((flags) & (tcp_flag_rst))
+#define IS_SYN(flags) ((flags) & (tcp_flag_syn))
+#define IS_FIN(flags) ((flags) & (tcp_flag_fin))
+
 int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
   uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout) { /* Initializes the nat */
 
@@ -56,13 +63,17 @@ int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
 
 void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
   struct sr_nat *nat = (struct sr_nat *)nat_ptr;
+
+  struct sr_nat_connection* curr_conn;
+  struct sr_nat_mapping* curr_map;
+  time_t curtime;
   while (1) {
     sleep(1.0);
     pthread_mutex_lock(&(nat->lock));
 
-    time_t curtime = time(NULL);
+    curtime = time(NULL);
 
-    struct sr_nat_mapping* curr_map = nat->mappings;
+    curr_map = nat->mappings;
     while(curr_map){
       if(curr_map->type == nat_mapping_icmp){
         if(difftime(curtime, curr_map->last_updated) >= nat->icmp_query_timeout){
@@ -70,7 +81,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
         }
       }
       else{/*timeout tcp connections*/
-        struct sr_nat_connection* curr_conn = curr_map->conns;
+        curr_conn = curr_map->conns;
         while(curr_conn){
           if(tcp_connection_expired(nat, curr_conn)){
             curr_conn->marked_for_delete = 1;
@@ -111,19 +122,21 @@ void timeout_mapping(struct sr_nat* nat){
     }
   }
 }
+
 /*1 if tcp connection expired, 0 otherwise*/
 int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connection){
   time_t curtime = time(NULL);
-  if(connection->current_state == tcp_established && 
+  if(connection->state == tcp_established && 
     difftime(curtime,connection->last_updated) >= nat->tcp_established_idle_timeout){
     return 1;
   }
-  else if(connection->current_state == tcp_transitory && 
+  else if(connection->state == tcp_transitory && 
     difftime(curtime,connection->last_updated) >= nat->tcp_transitory_idle_timeout){
     return 1;
   }
   return 0;
 }
+
 /*deletes tcp connections*/
 void timeout_tcp_connections(struct sr_nat_mapping* map){
 
@@ -156,9 +169,15 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
 
   pthread_mutex_lock(&(nat->lock));
 
-  /* handle lookup here, malloc and assign to copy */
-  struct sr_nat_mapping *copy = sr_nat_lookup_external_nolock(nat,
+  struct sr_nat_mapping *copy = NULL;
+  struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_external_ptr(nat,
     aux_ext, type);
+
+  /* If the mapping is found, make a copy of the mapping */
+  if (mapping_ptr) {
+    copy = malloc(sizeof(struct sr_nat_mapping));
+    memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
+  }
 
   pthread_mutex_unlock(&(nat->lock));
   return copy;
@@ -169,25 +188,18 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
    this implementation is separated from locks to prevent dead lock when
    called somewhere else, this function should only be called with lock 
    acquired. */
-struct sr_nat_mapping *sr_nat_lookup_external_nolock(struct sr_nat *nat,
+struct sr_nat_mapping *sr_nat_lookup_external_ptr(struct sr_nat *nat,
     uint16_t aux_ext, sr_nat_mapping_type type ) {
 
-  /* handle lookup here, malloc and assign to copy */
-  struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *map_walker = nat->mappings;
 
   while(map_walker){
     if(map_walker->type == type && map_walker->aux_ext == aux_ext){
-
-      /*fprintf(stderr, "Found external mapping match\n")*/
-      copy = malloc(sizeof(struct sr_nat_mapping));
-      memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
       break;
     }
     map_walker = map_walker->next;
   }
-
-  return copy;
+  return map_walker;
 }
 
 
@@ -198,10 +210,16 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
 
   pthread_mutex_lock(&(nat->lock));
 
-  /* handle lookup here, malloc and assign to copy. */
-  struct sr_nat_mapping *copy = sr_nat_lookup_internal_nolock(nat,
+  struct sr_nat_mapping *copy = NULL;
+  struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_internal_ptr(nat,
     ip_int, aux_int, type);
 
+  /* If the mapping is found, make a copy of the mapping */
+  if (mapping_ptr) {
+    copy = malloc(sizeof(struct sr_nat_mapping));
+    memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
+  }
+  
   pthread_mutex_unlock(&(nat->lock));
   return copy;
 }
@@ -210,23 +228,23 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
 /* This function implements the lookup_internal function without lock,
    this implementation is separated from locks to prevent dead lock when
    called somewhere else, this function should only be called with lock 
-   acquired. */
-struct sr_nat_mapping *sr_nat_lookup_internal_nolock(struct sr_nat *nat,
+   acquired. 
+
+   This function returns a pointer to the nat mapping, remember to create a copy of it.
+   If no mapping is found, return NULL. */
+struct sr_nat_mapping *sr_nat_lookup_internal_ptr(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
 
-  struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *map_walker = nat->mappings;
 
   while(map_walker){
     if(map_walker->type == type && map_walker->aux_int == aux_int &&
       map_walker->ip_int == ip_int){
-      copy = malloc(sizeof(struct sr_nat_mapping));
-      memcpy(copy, map_walker, sizeof(struct sr_nat_mapping));
       break;
     }
     map_walker = map_walker->next;
   }
-  return copy;
+  return map_walker;
 }
 
 
@@ -241,19 +259,17 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   struct sr_nat_mapping *copy = malloc(sizeof(struct sr_nat_mapping));
 
   /* Can't just call sr_nat_lookup_internal here, will cause deadlock */
-  struct sr_nat_mapping *internal_mapping = sr_nat_lookup_internal_nolock(
-    nat, ip_int, aux_int, type);
+  struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_internal_ptr(nat, ip_int, aux_int, type);
 
   /* If the mapping does not exists, create the mapping */
-  if (internal_mapping == NULL) {
-    internal_mapping = sr_nat_create_mapping(nat, ip_int, aux_int, type);
-    internal_mapping->next = nat->mappings;
-    nat->mappings = internal_mapping;
+  if (mapping_ptr == NULL) {
+    mapping_ptr = sr_nat_create_mapping(nat, ip_int, aux_int, type);
+    mapping_ptr->next = nat->mappings;
+    nat->mappings = mapping_ptr;
   }
 
   /* Create a copy of the mapping */
-  memcpy(copy, internal_mapping, sizeof(struct sr_nat_mapping));
-  free(internal_mapping);
+  memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
 
   pthread_mutex_unlock(&(nat->lock));
   return copy;
@@ -331,29 +347,125 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
   return new_mapping->aux_ext;
 }
 
-/* TODO: Need to update the actual nat table, not a copy of mapping, acquire lock when modifying */
-struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
-  uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote){
-  
-  struct sr_nat_connection *output = find_connection(map, ip_remote, aux_remote);
 
-  if (!output) {
-    output = malloc(sizeof(struct sr_nat_connection));
-    output->ip_ext = ip_ext;
-    output->aux_ext = aux_ext;
-    output->ip_remote = ip_remote;
-    output->aux_remote = aux_remote; 
-    output->last_updated = time(NULL); 
-    output->next = map->conns;
-    output->marked_for_delete = 0;
-    map->conns = output;
-  } else {
-    /*update the current connection's last_updated field*/
-    output->last_updated = time(NULL); 
+void update_tcp_connection_internal(struct sr_nat *nat, sr_ip_hdr_t *ip_hdr, sr_tcp_hdr_t *tcp_hdr) {
+
+  pthread_mutex_lock(&(nat->lock));
+
+  uint32_t ip_int = ip_hdr->ip_src;
+  uint16_t aux_int = tcp_hdr->port_src;
+
+  struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_internal_ptr(nat, ip_int, aux_int, nat_mapping_tcp);
+
+  if (mapping_ptr) {
+    update_tcp_connection(mapping_ptr, ip_hdr, tcp_hdr);
   }
 
-  return output;
+  pthread_mutex_unlock(&(nat->lock));
 }
+
+void update_tcp_connection_external(struct sr_nat *nat, sr_ip_hdr_t *ip_hdr, sr_tcp_hdr_t *tcp_hdr) {
+
+  pthread_mutex_lock(&(nat->lock));
+
+  uint16_t aux_ext = tcp_hdr->port_dst;
+
+  struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_external_ptr(nat, aux_ext, nat_mapping_tcp);
+
+  if (mapping_ptr) {
+    update_tcp_connection(mapping_ptr, ip_hdr, tcp_hdr);
+  }
+
+  pthread_mutex_unlock(&(nat->lock));
+}
+
+
+void update_tcp_connection(struct sr_nat_mapping *mapping, sr_ip_hdr_t *ip_hdr, sr_tcp_hdr_t *tcp_hdr) {
+  uint32_t ip_ext = mapping->ip_ext;
+  uint16_t aux_ext = mapping->aux_ext;;
+  uint32_t ip_remote = ip_hdr->ip_dst;
+  uint16_t aux_remote = tcp_hdr->port_src;
+  uint8_t flags = get_tcp_flags(tcp_hdr);
+
+  struct sr_nat_connection *connection_ptr = lookup_tcp_connection_ptr(mapping, ip_remote, aux_remote, ip_ext, aux_ext);
+
+  if (connection_ptr) {
+    update_tcp_connection_state(connection_ptr, flags);
+  } else {
+    /* If no connection exists, create one */
+    connection_ptr = create_tcp_connection(ip_ext, ip_remote, aux_ext, aux_remote, flags);
+    connection_ptr->next = mapping->conns;
+    mapping->conns = connection_ptr;
+  }
+}
+
+
+struct sr_nat_connection* lookup_tcp_connection_ptr(struct sr_nat_mapping *map, uint32_t ip_remote, uint16_t aux_remote,
+  uint32_t ip_ext, uint16_t aux_ext) {
+
+  struct sr_nat_connection *conns_walker = map->conns;
+
+  while (conns_walker) {
+    if(conns_walker->ip_remote == ip_remote && conns_walker->aux_remote == aux_remote &&
+      conns_walker->ip_ext == ip_ext && conns_walker->aux_ext == aux_ext){
+      return conns_walker;
+    }
+    conns_walker = conns_walker->next;
+  }
+
+  return NULL;
+}
+
+
+void update_tcp_connection_state(struct sr_nat_connection *connection, uint8_t curr_flags) {
+
+  tcp_state state = connection->state;
+  uint8_t last_flags = connection->last_flags;
+
+  if (state == tcp_transitory) {
+    if ((IS_SYN(last_flags) && IS_ACK(last_flags) && IS_ACK(curr_flags)) ||
+      (IS_SYN(last_flags) && IS_ACK(last_flags) && IS_SYN(curr_flags) && IS_ACK(curr_flags))) {
+      connection->state = tcp_established;
+    }
+  } else {
+    if (IS_ACK(last_flags) && IS_FIN(curr_flags)) {
+      connection->state = tcp_transitory;
+    }
+  }
+}
+
+
+struct sr_nat_connection* create_tcp_connection(uint32_t ip_ext, uint32_t ip_remote, uint16_t aux_ext, 
+  uint16_t aux_remote, uint8_t flags) {
+
+  struct sr_nat_connection *connection = malloc(sizeof(struct sr_nat_connection));
+
+  connection->ip_ext = ip_ext;
+  connection->ip_remote = ip_remote;
+  connection->aux_ext = aux_ext;
+  connection->aux_remote = aux_remote;
+  connection->last_updated = time(NULL);
+  connection->last_flags = 0;
+  connection->state = tcp_transitory;
+  connection->marked_for_delete = 0;
+  connection->next = NULL;
+
+  return connection;
+}
+
+
+uint8_t get_tcp_flags(sr_tcp_hdr_t *tcp_hdr) {
+  uint8_t flags = 0;
+  if (tcp_hdr->urg) flags = flags | tcp_flag_urg;
+  if (tcp_hdr->ack) flags = flags | tcp_flag_ack;
+  if (tcp_hdr->psh) flags = flags | tcp_flag_psh;
+  if (tcp_hdr->rst) flags = flags | tcp_flag_rst;
+  if (tcp_hdr->syn) flags = flags | tcp_flag_syn;
+  if (tcp_hdr->fin) flags = flags | tcp_flag_fin;
+
+  return flags;
+}
+
 
 struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, uint32_t ip_remote, uint16_t aux_remote) {
   struct sr_nat_connection *conns_walker = map->conns;

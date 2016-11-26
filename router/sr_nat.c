@@ -111,6 +111,7 @@ void timeout_mapping(struct sr_nat* nat){
     }
   }
 }
+
 /*1 if tcp connection expired, 0 otherwise*/
 int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connection){
   time_t curtime = time(NULL);
@@ -253,7 +254,6 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
   /* Create a copy of the mapping */
   memcpy(copy, internal_mapping, sizeof(struct sr_nat_mapping));
-  free(internal_mapping);
 
   pthread_mutex_unlock(&(nat->lock));
   return copy;
@@ -293,12 +293,12 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
 
   if (type == nat_mapping_tcp) {
     aux_ext_mapping = nat->tcp_port_mapping;
-    start_aux = START_PORT;
-    end_aux = END_PORT;
+    start_aux = htons(START_PORT);
+    end_aux = htons(END_PORT);
   } else {
     aux_ext_mapping = nat->icmp_id_mapping;
-    start_aux = START_ID;
-    end_aux = END_ID;
+    start_aux = htons(START_ID);
+    end_aux = htons(END_ID);
   }
 
   /* Search through the unique mapping */
@@ -321,10 +321,10 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
 
   /* Update the mapping */
   aux_ext_mapping->mappings = new_mapping;
-  aux_ext_mapping->current_aux += 1;
+  aux_ext_mapping->current_aux = htons(ntohs(aux_ext_mapping->current_aux) + 1);
 
   /* Rollover the auxiliary Id if it exceeds the limit */
-  if (aux_ext_mapping->current_aux > end_aux) {
+  if (ntohs(aux_ext_mapping->current_aux) > ntohs(end_aux)) {
     aux_ext_mapping->current_aux = start_aux;
   }
 

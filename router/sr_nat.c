@@ -63,7 +63,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
     time_t curtime = time(NULL);
 
     struct sr_nat_mapping* curr_map = nat->mappings;
-    while(curr_map){
+    while(curr_map) {
       if(curr_map->type == nat_mapping_icmp){
         if(difftime(curtime, curr_map->last_updated) >= nat->icmp_query_timeout){
           curr_map->marked_for_delete = 1;
@@ -82,7 +82,9 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
           curr_map->marked_for_delete = 1;
         }
       }
+      curr_map = curr_map->next;
     }
+
     timeout_mapping(nat);
     pthread_mutex_unlock(&(nat->lock));
   }

@@ -185,7 +185,6 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet) {
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
   uint8_t *forwarding_packet = ip_packet;
-  sr_ip_hdr_t *forwarding_ip_hdr = (sr_ip_hdr_t *) forwarding_packet;
 
   /* Apply NAT to the packet if it is in use */
   int forwardPacket = 1;
@@ -197,7 +196,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
     if (sr_is_interface_internal(incoming_interface)) {
       forwardPacket = sr_nat_handle_internal(sr, nat_packet);
     } else {
-      /* TODO: sr_nat_handle_external */
+      forwardPacket = sr_nat_handle_external(sr, nat_packet);
     }
 
     if (!forwardPacket) {
@@ -210,6 +209,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
 
   /* Initialize packet src/dest with 'reply' type values before NAT is applied as multiple cases involve sending back an
      icmp packet to the original source */
+  sr_ip_hdr_t *forwarding_ip_hdr = (sr_ip_hdr_t *) forwarding_packet;
   struct sr_rt* reply_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
   struct sr_if *reply_interface = sr_get_interface(sr, reply_rt->interface);
   uint32_t ip_dest = ip_hdr->ip_src;
@@ -544,22 +544,20 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
   if(ip_hdr->ip_p == ip_protocol_icmp){
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
-    /* Only need to handle echo requests from internal addresses */
-    if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
+    struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
 
-      struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
-      if (!icmp_mapping) return 0;
+    if (!icmp_mapping) return 0;
 
-      icmp_hdr->id = icmp_mapping->aux_int;
-      icmp_hdr->icmp_sum = 0;
-      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
+    icmp_hdr->id = icmp_mapping->aux_int;
+    icmp_hdr->icmp_sum = 0;
+    icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
 
-      ip_hdr->ip_src = icmp_mapping->ip_int;
-      ip_hdr->ip_sum = 0;
-      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
+    ip_hdr->ip_src = nat->internal_if_ip;
+    ip_hdr->ip_dst = icmp_mapping->ip_int;
+    ip_hdr->ip_sum = 0;
+    ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
 
-      free(icmp_mapping);
-    }
+    free(icmp_mapping);
   } else {
     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
 

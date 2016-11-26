@@ -185,28 +185,6 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   struct sr_ethernet_hdr *ethernet_hdr, uint8_t *ip_packet) {
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
   uint8_t *forwarding_packet = ip_packet;
-  sr_ip_hdr_t *forwarding_ip_hdr = (sr_ip_hdr_t *) forwarding_packet;
-
-  /* Apply NAT to the packet if it is in use */
-  int forwardPacket = 1;
-
-  if (sr->nat->is_active) {
-    uint8_t *nat_packet = malloc(ip_hdr->ip_len);
-    memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
-
-    if (sr_is_interface_internal(incoming_interface)) {
-      forwardPacket = sr_nat_handle_internal(sr, nat_packet);
-    } else {
-      /* TODO: sr_nat_handle_external */
-    }
-
-    if (!forwardPacket) {
-      free(nat_packet);
-      return;
-    }
-
-    forwarding_packet = nat_packet;
-  }
 
   /* Initialize packet src/dest with 'reply' type values before NAT is applied as multiple cases involve sending back an
      icmp packet to the original source */
@@ -216,11 +194,33 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   uint32_t ip_src = reply_interface->ip;
   uint8_t* eth_src = ethernet_hdr->ether_dhost;
   uint8_t* eth_dest = ethernet_hdr->ether_shost;
+  int forwardNATPacket = 0;
 
-  if (forwarding_ip_hdr->ip_ttl <= 1) {
+  /* Apply NAT to the packet if it is in use */
+  if (sr->nat->is_active && ip_hdr->ip_ttl > 1) {
+    uint8_t *nat_packet = malloc(ip_hdr->ip_len);
+    memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
+    forwardNATPacket = 1;
+
+    if (sr_is_interface_internal(incoming_interface)) {
+      forwardNATPacket = sr_nat_handle_internal(sr, nat_packet);
+    } else {
+      forwardNATPacket = sr_nat_handle_external(sr, nat_packet);
+    }
+
+    if (!forwardNATPacket) {
+      free(nat_packet);
+      return;
+    }
+
+    forwarding_packet = nat_packet;
+  }
+
+  sr_ip_hdr_t *forwarding_ip_hdr = (sr_ip_hdr_t *) forwarding_packet;
+
+  if (ip_hdr->ip_ttl <= 1) {
     /* Send ICMP time exceeded*/
-    sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, forwarding_packet);
-
+    sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, ip_packet);
     createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
   } else {
     /* Get the MAC address of next hub*/
@@ -228,7 +228,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
 
     /* Send ICMP network unreachable if the ip cannot be identified through our routing table */
     if (longestPrefixIPMatch == NULL) {
-      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, forwarding_packet);
+      sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, ip_packet);
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
     } else {
       /* Check if the destination is in the arp cache */
@@ -254,7 +254,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   }
 
   /* Free the NAT packet if it is in use */
-  if (sr->nat->is_active) {
+  if (forwardNATPacket) {
     free(forwarding_packet);
   }
 }
@@ -545,22 +545,20 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
   if(ip_hdr->ip_p == ip_protocol_icmp){
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
-    /* Only need to handle echo requests from internal addresses */
-    if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
+    struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
 
-      struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
-      if (!icmp_mapping) return 0;
+    if (!icmp_mapping) return 0;
 
-      icmp_hdr->id = icmp_mapping->aux_int;
-      icmp_hdr->icmp_sum = 0;
-      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
+    icmp_hdr->id = icmp_mapping->aux_int;
+    icmp_hdr->icmp_sum = 0;
+    icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
 
-      ip_hdr->ip_src = icmp_mapping->ip_int;
-      ip_hdr->ip_sum = 0;
-      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
+    ip_hdr->ip_src = nat->internal_if_ip;
+    ip_hdr->ip_dst = icmp_mapping->ip_int;
+    ip_hdr->ip_sum = 0;
+    ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
 
-      free(icmp_mapping);
-    }
+    free(icmp_mapping);
   } else {
     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
 

@@ -73,8 +73,8 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 
     curtime = time(NULL);
 
-    curr_map = nat->mappings;
-    while(curr_map){
+    struct sr_nat_mapping* curr_map = nat->mappings;
+    while(curr_map) {
       if(curr_map->type == nat_mapping_icmp){
         if(difftime(curtime, curr_map->last_updated) >= nat->icmp_query_timeout){
           curr_map->marked_for_delete = 1;
@@ -93,7 +93,9 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
           curr_map->marked_for_delete = 1;
         }
       }
+      curr_map = curr_map->next;
     }
+
     timeout_mapping(nat);
     pthread_mutex_unlock(&(nat->lock));
   }
@@ -309,12 +311,12 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
 
   if (type == nat_mapping_tcp) {
     aux_ext_mapping = nat->tcp_port_mapping;
-    start_aux = START_PORT;
-    end_aux = END_PORT;
+    start_aux = htons(START_PORT);
+    end_aux = htons(END_PORT);
   } else {
     aux_ext_mapping = nat->icmp_id_mapping;
-    start_aux = START_ID;
-    end_aux = END_ID;
+    start_aux = htons(START_ID);
+    end_aux = htons(END_ID);
   }
 
   /* Search through the unique mapping */
@@ -337,10 +339,10 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
 
   /* Update the mapping */
   aux_ext_mapping->mappings = new_mapping;
-  aux_ext_mapping->current_aux += 1;
+  aux_ext_mapping->current_aux = htons(ntohs(aux_ext_mapping->current_aux) + 1);
 
   /* Rollover the auxiliary Id if it exceeds the limit */
-  if (aux_ext_mapping->current_aux > end_aux) {
+  if (ntohs(aux_ext_mapping->current_aux) > ntohs(end_aux)) {
     aux_ext_mapping->current_aux = start_aux;
   }
 

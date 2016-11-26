@@ -15,7 +15,7 @@
 #define sr_IFACE_NAMELEN 32
 #define START_PORT 1025
 #define END_PORT 65535
-#define START_ID 0
+#define START_ID 1
 #define END_ID 65535
 
 typedef enum {

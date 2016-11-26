@@ -194,20 +194,21 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   uint32_t ip_src = reply_interface->ip;
   uint8_t* eth_src = ethernet_hdr->ether_dhost;
   uint8_t* eth_dest = ethernet_hdr->ether_shost;
+  int forwardNATPacket = 0;
 
   /* Apply NAT to the packet if it is in use */
   if (sr->nat->is_active && ip_hdr->ip_ttl > 1) {
-    int forwardPacket = 1;
     uint8_t *nat_packet = malloc(ip_hdr->ip_len);
     memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
+    forwardNATPacket = 1;
 
     if (sr_is_interface_internal(incoming_interface)) {
-      forwardPacket = sr_nat_handle_internal(sr, nat_packet);
+      forwardNATPacket = sr_nat_handle_internal(sr, nat_packet);
     } else {
-      forwardPacket = sr_nat_handle_external(sr, nat_packet);
+      forwardNATPacket = sr_nat_handle_external(sr, nat_packet);
     }
 
-    if (!forwardPacket) {
+    if (!forwardNATPacket) {
       free(nat_packet);
       return;
     }
@@ -220,7 +221,6 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   if (ip_hdr->ip_ttl <= 1) {
     /* Send ICMP time exceeded*/
     sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, ip_packet);
-
     createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
   } else {
     /* Get the MAC address of next hub*/
@@ -254,7 +254,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   }
 
   /* Free the NAT packet if it is in use */
-  if (sr->nat->is_active) {
+  if (forwardNATPacket) {
     free(forwarding_packet);
   }
 }

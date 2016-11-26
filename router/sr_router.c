@@ -488,7 +488,7 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
 
       icmp_hdr->id = icmp_mapping->aux_ext;
       icmp_hdr->icmp_sum = 0;
-      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
+      icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t));
 
       ip_hdr->ip_src = icmp_mapping->ip_ext;
       ip_hdr->ip_sum = 0;

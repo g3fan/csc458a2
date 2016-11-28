@@ -551,9 +551,8 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
 
     icmp_hdr->id = icmp_mapping->aux_int;
     icmp_hdr->icmp_sum = 0;
-    icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, sizeof(sr_ip_hdr_t));
+    icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t));
 
-    ip_hdr->ip_src = nat->internal_if_ip;
     ip_hdr->ip_dst = icmp_mapping->ip_int;
     ip_hdr->ip_sum = 0;
     ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));

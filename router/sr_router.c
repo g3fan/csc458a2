@@ -205,8 +205,8 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
      /* NAT is only used in certain cases
         This occurs when, 1. Internal(source) to external(destination) interface
                           2. External(source) to the external NAT interface (destination) */
-    if (sr_is_interface_internal(reply_interface) && sr_is_interface_external(forward_interface) ||
-     sr_is_interface_external(reply_interface) && ip_hdr->ip_dst == sr->nat->external_if_ip) {
+    if ((sr_is_interface_internal(reply_interface) && sr_is_interface_external(forward_interface)) ||
+     (sr_is_interface_external(reply_interface) && ip_hdr->ip_dst == sr->nat->external_if_ip)) {
 
       uint8_t *nat_packet = malloc(ip_hdr->ip_len);
       memcpy(nat_packet, ip_packet, ip_hdr->ip_len);

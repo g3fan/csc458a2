@@ -174,8 +174,9 @@ struct sr_rt* get_longest_prefix_match_interface(struct sr_rt *routingTable, uin
     struct sr_rt* output = NULL;
 
     while(currRTEntry) {
-        if(targetIPMatchesEntry(currRTEntry->dest.s_addr, currRTEntry->mask.s_addr, targetIP) == 1){
-            if(ntohl((uint32_t)currRTEntry->mask.s_addr) > ntohl(longestMask)) {
+        if(targetIPMatchesEntry(currRTEntry->dest.s_addr, currRTEntry->mask.s_addr, targetIP) == 1){ 
+            /* Always use longest mask, taking into account default route mask = 0 */
+            if(ntohl((uint32_t)currRTEntry->mask.s_addr) >= ntohl(longestMask)) {
                 longestMask = (uint32_t)currRTEntry->mask.s_addr;
                 output = currRTEntry;
             }

@@ -521,5 +521,8 @@ uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet) {
     }
   }
 
+  if (mapping != NULL) {
+    free(mapping);
+  }
   return nat_ip_src;
 }

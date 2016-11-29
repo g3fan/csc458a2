@@ -305,6 +305,30 @@ void print_hdr_arp(uint8_t *buf) {
   print_addr_ip_int(ntohl(arp_hdr->ar_tip));
 }
 
+/* Prints out fields in IP header. */
+void print_hdr_tcp(uint8_t *buf) {
+  sr_tcp_hdr_t *tcphdr = (sr_tcp_hdr_t *)(buf);
+
+  fprintf(stderr, "TCP header:\n");
+  fprintf(stderr, "\tsource port: %d\n", ntohs(tcphdr->port_src));
+  fprintf(stderr, "\tdestination port: %d\n", ntohs(tcphdr->port_dst));
+  fprintf(stderr, "\tsequence number: %d\n", ntohl(tcphdr->seq_num));
+  fprintf(stderr, "\tack number: %d\n", ntohl(tcphdr->ack_num));
+  fprintf(stderr, "\tprotocol: %d\n", tcphdr->protocol);
+  fprintf(stderr, "\toffset: %d\n", tcphdr->offset);
+  fprintf(stderr, "\treserved: %d\n", tcphdr->reserved);
+  fprintf(stderr, "\tecn: %d\n", tcphdr->ecn);
+  fprintf(stderr, "\tack: %d\n", tcphdr->urg);
+  fprintf(stderr, "\tpsh: %d\n", tcphdr->psh);
+  fprintf(stderr, "\trst: %d\n", tcphdr->rst);
+  fprintf(stderr, "\tsyn: %d\n", tcphdr->syn);
+  fprintf(stderr, "\tfin: %d\n", tcphdr->fin);
+  fprintf(stderr, "\twindow: %d\n", ntohs(tcphdr->window));
+  fprintf(stderr, "\tchecksum: %d\n", tcphdr->tcp_sum);
+  fprintf(stderr, "\turgent: %d\n", ntohs(tcphdr->urgent));
+  fprintf(stderr, "\toptions: %d\n", ntohl(tcphdr->options));
+}
+
 /* Prints out all possible headers, starting from Ethernet */
 void print_hdrs(uint8_t *buf, uint32_t length) {
 
@@ -334,6 +358,12 @@ void print_hdrs(uint8_t *buf, uint32_t length) {
         fprintf(stderr, "Failed to print ICMP header, insufficient length\n");
       else
         print_hdr_icmp(buf + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+    } else if (ip_proto == ip_protocol_tcp) {
+      minlength += sizeof(sr_tcp_hdr_t);
+      if (length < minlength)
+        fprintf(stderr, "Failed to print TCP header, insufficient length\n");
+      else
+        print_hdr_tcp(buf + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
     }
   }
   else if (ethtype == ethertype_arp) { /* ARP */

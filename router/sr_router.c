@@ -386,14 +386,11 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
       struct sr_nat_mapping *mapping = sr_nat_lookup_external(sr->nat, icmp_hdr->id, nat_mapping_icmp);
 
       if (mapping == NULL) {
-        free(mapping);
         return sr_is_packet_recipient(sr, ip_hdr->ip_dst);
       } else {
         free(mapping);
         return 0;
       }
-
-      free(mapping);
     }
   }
 

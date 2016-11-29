@@ -196,24 +196,36 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   uint8_t* eth_dest = ethernet_hdr->ether_shost;
   int forwardNATPacket = 0;
 
-  /* Apply NAT to the packet if it is in use */
-  if (sr->nat->is_active && ip_hdr->ip_ttl > 1) {
-    uint8_t *nat_packet = malloc(ip_hdr->ip_len);
-    memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
-    forwardNATPacket = 1;
+  /* Get the MAC address of next hub */
+  struct sr_rt* forward_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_dst);
 
-    if (sr_is_interface_internal(incoming_interface)) {
-      forwardNATPacket = sr_nat_handle_internal(sr, nat_packet);
-    } else {
-      forwardNATPacket = sr_nat_handle_external(sr, nat_packet);
+  /* Apply NAT logic to the packet if it is active */
+  if (sr->nat->is_active && ip_hdr->ip_ttl > 1 && forward_rt != NULL) {
+    struct sr_if *forward_interface = sr_get_interface(sr, forward_rt->interface);
+     /* NAT is only used in certain cases
+        This occurs when, 1. Internal(source) to external(destination) interface
+                          2. External(source) to the external NAT interface (destination) */
+    if (sr_is_interface_internal(reply_interface) && sr_is_interface_external(forward_interface) ||
+     sr_is_interface_external(reply_interface) && ip_hdr->ip_dst == sr->nat->external_if_ip) {
+
+      uint8_t *nat_packet = malloc(ip_hdr->ip_len);
+      memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
+      forwardNATPacket = 1;
+
+      if (sr_is_interface_internal(incoming_interface)) {
+        forwardNATPacket = sr_nat_handle_internal(sr, nat_packet);
+      } else {
+        forwardNATPacket = sr_nat_handle_external(sr, nat_packet);
+      }
+
+      /* TODO: Determine if valid */
+      if (!forwardNATPacket) {
+        free(nat_packet);
+        return;
+      }
+
+      forwarding_packet = nat_packet;
     }
-
-    if (!forwardNATPacket) {
-      free(nat_packet);
-      return;
-    }
-
-    forwarding_packet = nat_packet;
   }
 
   sr_ip_hdr_t *forwarding_ip_hdr = (sr_ip_hdr_t *) forwarding_packet;
@@ -223,11 +235,11 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
     sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, ip_packet);
     createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
   } else {
-    /* Get the MAC address of next hub*/
-    struct sr_rt* longestPrefixIPMatch = get_longest_prefix_match_interface(sr->routing_table, forwarding_ip_hdr->ip_dst);
-
-    /* Send ICMP network unreachable if the ip cannot be identified through our routing table */
-    if (longestPrefixIPMatch == NULL) {
+    /* Re-determine forwarding interfaces for packet after possible NAT translation */
+    forward_rt = get_longest_prefix_match_interface(sr->routing_table, forwarding_ip_hdr->ip_dst);
+    
+    if (forward_rt == NULL) {
+      /* Send ICMP network unreachable if the ip cannot be identified through our routing table */
       sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, ip_packet);
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
     } else {
@@ -235,7 +247,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
       struct sr_arpentry *arp_entry = sr_arpcache_lookup(&(sr->cache), forwarding_ip_hdr->ip_dst);
       unsigned int ip_packet_len = ntohs(forwarding_ip_hdr->ip_len);
 
-      /* Decrement the TTL*/
+      /* Decrement the TTL */
       increment_ttl(forwarding_packet, -1);
     
       if (arp_entry == NULL) {
@@ -243,8 +255,8 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
         queue_ethernet_packet(sr, forwarding_packet, ip_packet_len, eth_dest);
       } else {
         /* When forwarding to next-hop, only mac addresses change*/
-        struct sr_if* outgoing_interface = sr_get_interface(sr, longestPrefixIPMatch->interface);
-        eth_src = outgoing_interface->addr;
+        struct sr_if *forward_interface = sr_get_interface(sr, forward_rt->interface);
+        eth_src = forward_interface->addr;
         eth_dest = arp_entry->mac;
 
         sr_create_send_ethernet_packet(sr, eth_src, eth_dest, ethertype_ip, forwarding_packet, ip_packet_len);

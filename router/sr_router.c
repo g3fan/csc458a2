@@ -483,7 +483,7 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
 
     /* Only need to handle echo requests from internal addresses */
     if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
-      struct sr_nat_mapping *icmp_mapping = icmp_mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src,
+      struct sr_nat_mapping *icmp_mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src,
         icmp_hdr->id, nat_mapping_icmp);
 
       icmp_hdr->id = icmp_mapping->aux_ext;

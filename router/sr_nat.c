@@ -106,17 +106,19 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 void timeout_mapping(struct sr_nat* nat){
   struct sr_nat_mapping* curr_map = nat->mappings;
   struct sr_nat_mapping* prev_map = NULL;
+  struct sr_nat_mapping* delete_this_map = NULL;
   while(curr_map){
     if(curr_map->marked_for_delete){
-      if(!prev_map){
+      delete_this_map = curr_map;
+      if(!prev_map){/*we are deleting the head*/
+        nat->mappings = curr_map->next;
         curr_map = curr_map->next;
-        nat->mappings = curr_map;
       }
       else{
         curr_map = curr_map->next;
         prev_map->next = curr_map;
       }
-      free(curr_map);
+      free(delete_this_map);
     }
     else{
       prev_map = curr_map;
@@ -144,17 +146,19 @@ void timeout_tcp_connections(struct sr_nat_mapping* map){
 
   struct sr_nat_connection* curr_conn = map->conns;
   struct sr_nat_connection* prev_conn = NULL;
+  struct sr_nat_connection* delete_this_conn = NULL;
   while(curr_conn){
     if(curr_conn->marked_for_delete){
+      delete_this_conn = curr_conn;
       if(!prev_conn){
+        map->conns = curr_conn->next;
         curr_conn = curr_conn->next;
-        map->conns = curr_conn;
       }
       else{
         curr_conn = curr_conn->next;
         prev_conn->next = curr_conn;
       }
-      free(curr_conn);
+      free(delete_this_conn);
     }
     else{
       prev_conn = curr_conn;

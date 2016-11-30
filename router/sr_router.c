@@ -491,7 +491,7 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
   struct sr_nat* nat = sr->nat;
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
 
-  fprintf(stderr, "Handle Internal");
+  fprintf(stderr, "Handle Internal\n");
   print_hdr_ip(ip_packet);
 
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
@@ -562,7 +562,7 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
   struct sr_nat* nat = sr->nat;
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
 
-  fprintf(stderr, "Handle External");
+  fprintf(stderr, "Handle External\n");
   print_hdr_ip(ip_packet);
 
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;

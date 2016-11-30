@@ -19,8 +19,8 @@
 #define END_ID 65535
 
 typedef enum {
-  nat_mapping_icmp,
-  nat_mapping_tcp,
+  nat_mapping_icmp = 0,
+  nat_mapping_tcp = 1,
   /* nat_mapping_udp, */
 } sr_nat_mapping_type;
 
@@ -168,4 +168,6 @@ struct sr_nat_connection* lookup_tcp_connection_ptr(struct sr_nat_mapping *map, 
 struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, uint32_t ip_remote, uint16_t aux_remote);
 
 uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet);
+void print_nat_mapping(uint8_t *buf);
+
 #endif

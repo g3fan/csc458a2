@@ -483,14 +483,18 @@ void *unsolicited_syn_thread(void* input) {
 
     TODO: handle TCP connection state update */
 int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
-  
-  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
-  if(ip_hdr->ip_p == ip_protocol_udp) return 0;
-
   struct sr_nat* nat = sr->nat;
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
+
+  fprintf(stderr, "Handle Internal");
+  print_hdr_ip(ip_packet);
+
+  if(ip_hdr->ip_p == ip_protocol_udp) return 0;
 
   if(ip_hdr->ip_p == ip_protocol_icmp) {
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
+
+    print_hdr_icmp((uint8_t *) icmp_hdr);
 
     /* Only need to handle echo requests from internal addresses */
     if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
@@ -509,6 +513,8 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
     }
   } else {
       sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+
+      print_hdr_tcp((uint8_t *) tcp_hdr);
 
       /* Initialize the tcp mapping and connections and apply it to the packet */
       struct sr_nat_mapping *mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src, tcp_hdr->port_src, nat_mapping_tcp);
@@ -551,10 +557,15 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
   struct sr_nat* nat = sr->nat;
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
 
+  fprintf(stderr, "Handle External");
+  print_hdr_ip(ip_packet);
+
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
 
   if(ip_hdr->ip_p == ip_protocol_icmp){
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
+
+    print_hdr_icmp((uint8_t *) icmp_hdr);
 
     struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
 
@@ -571,6 +582,8 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
     free(icmp_mapping);
   } else {
     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
+
+    print_hdr_tcp((uint8_t *) tcp_hdr);
 
     /* Lookup for TCP packet */
     struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);

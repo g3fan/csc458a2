@@ -2,6 +2,7 @@
 #include <assert.h>
 #include "sr_nat.h"
 #include <unistd.h>
+#include <stdio.h>
 
 #define IS_URG(flags) ((flags) & (tcp_flag_urg))
 #define IS_ACK(flags) ((flags) & (tcp_flag_ack))
@@ -118,6 +119,8 @@ void timeout_mapping(struct sr_nat* nat){
         curr_map = curr_map->next;
         prev_map->next = curr_map;
       }
+      printf("Timeout following nat mapping:\n");
+      print_nat_mapping((uint8_t *) delete_this_map);
       free(delete_this_map);
     }
     else{
@@ -529,4 +532,29 @@ uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet) {
     free(mapping);
   }
   return nat_ip_src;
+}
+
+void print_nat_mapping(uint8_t *buf) {
+  struct sr_nat_mapping *mapping = (struct sr_nat_mapping *)(buf);
+
+  printf("NAT mapping:\n");
+
+  if (mapping->type == 0) {
+    printf("\ttype: ICMP\n");
+  } else {
+    printf("\ttype: TCP\n");
+  }
+
+  printf("\tinteral IP: ");
+  print_addr_ip_int(ntohl(mapping->ip_int));
+  printf("\texternal IP: ");
+  print_addr_ip_int(ntohl(mapping->ip_ext));
+
+  if (mapping->type == 0) {
+    printf("\tinteral ID: %d\n", ntohs(mapping->aux_int));
+    printf("\texternal ID: %d\n", ntohs(mapping->aux_ext));
+  } else {
+    printf("\tinteral port: %d\n", ntohs(mapping->aux_int));
+    printf("\texternal port: %d\n", ntohs(mapping->aux_ext));
+  }
 }

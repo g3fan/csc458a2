@@ -115,20 +115,25 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 
 /*deletes mapping from the nat*/
 void timeout_mapping(struct sr_nat* nat, sr_nat_mapping_type type){
-  struct sr_nat_mapping* head_map = get_type_mapping(nat, type);
-  struct sr_nat_mapping* curr_map = head_map;
+  struct sr_nat_mapping* curr_map = get_type_mapping(nat, type);
   struct sr_nat_mapping* prev_map = NULL;
   struct sr_nat_mapping* delete_this_map = NULL;
   while(curr_map){
     if(curr_map->marked_for_delete){
       delete_this_map = curr_map;
       if(!prev_map){/*we are deleting the head*/
-        head_map = curr_map->next;
+        if (type == nat_mapping_icmp) {
+          nat->icmp_mappings = curr_map->next;
+        } else {
+          nat->tcp_mappings = curr_map->next;
+        }
+
         curr_map = curr_map->next;
       }
       else{
         curr_map = curr_map->next;
         prev_map->next = curr_map;
+
       }
       fprintf(stderr, "Timeout following nat mapping:\n");
       print_nat_mapping((uint8_t *) delete_this_map);
@@ -289,7 +294,12 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   if (mapping_ptr == NULL) {
     mapping_ptr = sr_nat_create_mapping(nat, ip_int, aux_int, type);
     mapping_ptr->next = head_mapping;
-    head_mapping = mapping_ptr;
+
+    if (type == nat_mapping_icmp) {
+      nat->icmp_mappings = mapping_ptr;
+    } else {
+      nat->tcp_mappings = mapping_ptr;
+    }
   }
 
   /* Create a copy of the mapping */

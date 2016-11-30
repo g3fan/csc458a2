@@ -395,13 +395,24 @@ struct sr_if *sr_copy_interface(struct sr_if *interface) {
 int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, uint8_t *ip_packet) {
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)ip_packet;
 
-  if (sr->nat != NULL && ip_hdr->ip_p == ip_protocol_icmp) {
-    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
+  if (sr->nat->is_active) {
 
+    uint16_t id = 0;
+    sr_nat_mapping_type type;
+    if(ip_hdr->ip_p == ip_protocol_icmp){
+      sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
+      id =  icmp_hdr->id;
+      type = nat_mapping_icmp;
+    }
+    else if(ip_hdr->ip_p == ip_protocol_tcp){
+      sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
+      id =  tcp_hdr->port_dst;
+      type = nat_mapping_tcp;
+    }
     /* Packets from external sources to the router without a NAT mapping are determined to be
        for the router */
     if (sr_is_interface_external(interface)) {
-      struct sr_nat_mapping *mapping = sr_nat_lookup_external(sr->nat, icmp_hdr->id, nat_mapping_icmp);
+      struct sr_nat_mapping *mapping = sr_nat_lookup_external(sr->nat, id, type);
 
       if (mapping == NULL) {
         return sr_is_packet_recipient(sr, ip_hdr->ip_dst);

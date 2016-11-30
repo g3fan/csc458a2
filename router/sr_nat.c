@@ -20,7 +20,7 @@ int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
   /* Acquire mutex lock */
   pthread_mutexattr_init(&(nat->attr));
   pthread_mutexattr_settype(&(nat->attr), PTHREAD_MUTEX_RECURSIVE);
-  int success = pthread_mutex_init(&(nat->lock), &(nat->attr));
+  int success = pthread_mutex_init(&(nat->tcp_lock), &(nat->attr)) && pthread_mutex_init(&(nat->icmp_lock), &(nat->attr));
 
   /* Initialize timeout thread */
 
@@ -33,32 +33,30 @@ int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
   /* CAREFUL MODIFYING CODE ABOVE THIS LINE! */
 
   nat->is_active = 1;
-  nat->mappings = NULL;
+  nat->tcp_mappings = NULL;
+  nat->icmp_mappings = NULL;
 
   /* Initialize any variables here */
   nat->icmp_query_timeout = icmp_query_timeout;
   nat->tcp_established_idle_timeout = tcp_established_idle_timeout;
   nat->tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
 
-  nat->tcp_port_mapping = malloc(sizeof(struct sr_aux_ext_mapping_wrap));
-  nat->tcp_port_mapping->current_aux = htons(START_PORT);
-  nat->tcp_port_mapping->mappings = NULL;
-
-  nat->icmp_id_mapping = malloc(sizeof(struct sr_aux_ext_mapping_wrap));
-  nat->icmp_id_mapping->current_aux = htons(START_ID);
-  nat->icmp_id_mapping->mappings = NULL;
+  nat->aux_tcp = htons(START_PORT);
+  nat->aux_icmp = htons(START_ID);
 
   return success;
 }
 
 int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
 
-  pthread_mutex_lock(&(nat->lock));
+  pthread_mutex_lock(&(nat->tcp_lock));
+  pthread_mutex_lock(&(nat->icmp_lock));
 
   /* free nat memory here */
 
   pthread_kill(nat->thread, SIGKILL);
-  return pthread_mutex_destroy(&(nat->lock)) &&
+  return pthread_mutex_destroy(&(nat->tcp_lock)) &&
+    pthread_mutex_destroy(&(nat->icmp_lock)) &&
     pthread_mutexattr_destroy(&(nat->attr));
 
 }
@@ -71,49 +69,61 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
   time_t curtime;
   while (1) {
     sleep(1.0);
-    pthread_mutex_lock(&(nat->lock));
 
+    pthread_mutex_lock(&(nat->icmp_lock));
     curtime = time(NULL);
+    curr_map = nat->icmp_mappings;
 
-    curr_map = nat->mappings;
     while(curr_map){
-      if(curr_map->type == nat_mapping_icmp){
-        if(difftime(curtime, curr_map->last_updated) >= nat->icmp_query_timeout){
-          curr_map->marked_for_delete = 1;
-        }
-      }
-      else{/*timeout tcp connections*/
-        curr_conn = curr_map->conns;
-        while(curr_conn){
-          if(tcp_connection_expired(nat, curr_conn)){
-            curr_conn->marked_for_delete = 1;
-          }
-          curr_conn = curr_conn->next;
-        }
-        timeout_tcp_connections(curr_map);
-        if(!curr_map->conns){
-          curr_map->marked_for_delete = 1;
-        }
+      if(difftime(curtime, curr_map->last_updated) >= nat->icmp_query_timeout){
+        curr_map->marked_for_delete = 1;
       }
       curr_map = curr_map->next;
     }
 
-    timeout_mapping(nat);
-    pthread_mutex_unlock(&(nat->lock));
+    timeout_mapping(nat, nat_mapping_icmp);
+    pthread_mutex_unlock(&(nat->icmp_lock));
+
+    pthread_mutex_lock(&(nat->tcp_lock));
+    curtime = time(NULL);
+    curr_map = nat->tcp_mappings;
+
+    while(curr_map){
+      curr_conn = curr_map->conns;
+
+      while(curr_conn){
+        if(tcp_connection_expired(nat, curr_conn)){
+          curr_conn->marked_for_delete = 1;
+        }
+        curr_conn = curr_conn->next;
+      }
+
+      timeout_tcp_connections(curr_map);
+
+      if(!curr_map->conns){
+        curr_map->marked_for_delete = 1;
+      }
+
+      curr_map = curr_map->next;
+    }
+
+    timeout_mapping(nat, nat_mapping_icmp);
+    pthread_mutex_unlock(&(nat->tcp_lock));
   }
   return NULL;
 }
 
 /*deletes mapping from the nat*/
-void timeout_mapping(struct sr_nat* nat){
-  struct sr_nat_mapping* curr_map = nat->mappings;
+void timeout_mapping(struct sr_nat* nat, sr_nat_mapping_type type){
+  struct sr_nat_mapping* head_map = get_type_mapping(nat, type);
+  struct sr_nat_mapping* curr_map = head_map;
   struct sr_nat_mapping* prev_map = NULL;
   struct sr_nat_mapping* delete_this_map = NULL;
   while(curr_map){
     if(curr_map->marked_for_delete){
       delete_this_map = curr_map;
       if(!prev_map){/*we are deleting the head*/
-        nat->mappings = curr_map->next;
+        head_map = curr_map->next;
         curr_map = curr_map->next;
       }
       else{
@@ -177,7 +187,8 @@ void timeout_tcp_connections(struct sr_nat_mapping* map){
 struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
     uint16_t aux_ext, sr_nat_mapping_type type ) {
 
-  pthread_mutex_lock(&(nat->lock));
+  pthread_mutex_t lock = get_type_lock(nat, type);
+  pthread_mutex_lock(&(lock));
 
   struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_external_ptr(nat,
@@ -189,7 +200,7 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
     memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
   }
 
-  pthread_mutex_unlock(&(nat->lock));
+  pthread_mutex_unlock(&(lock));
   return copy;
 }
 
@@ -201,10 +212,10 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
 struct sr_nat_mapping *sr_nat_lookup_external_ptr(struct sr_nat *nat,
     uint16_t aux_ext, sr_nat_mapping_type type ) {
 
-  struct sr_nat_mapping *map_walker = nat->mappings;
+  struct sr_nat_mapping *map_walker = get_type_mapping(nat, type);
 
-  while(map_walker){
-    if(map_walker->type == type && map_walker->aux_ext == aux_ext){
+  while (map_walker) {
+    if (map_walker->aux_ext == aux_ext) {
       break;
     }
     map_walker = map_walker->next;
@@ -218,7 +229,8 @@ struct sr_nat_mapping *sr_nat_lookup_external_ptr(struct sr_nat *nat,
 struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
 
-  pthread_mutex_lock(&(nat->lock));
+  pthread_mutex_t lock = get_type_lock(nat, type);
+  pthread_mutex_lock(&(lock));
 
   struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_internal_ptr(nat,
@@ -230,7 +242,7 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
     memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
   }
   
-  pthread_mutex_unlock(&(nat->lock));
+  pthread_mutex_unlock(&(lock));
   return copy;
 }
 
@@ -245,7 +257,7 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
 struct sr_nat_mapping *sr_nat_lookup_internal_ptr(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
 
-  struct sr_nat_mapping *map_walker = nat->mappings;
+  struct sr_nat_mapping *map_walker = get_type_mapping(nat, type);
 
   while(map_walker){
     if(map_walker->type == type && map_walker->aux_int == aux_int &&
@@ -263,25 +275,27 @@ struct sr_nat_mapping *sr_nat_lookup_internal_ptr(struct sr_nat *nat,
 struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
 
-  pthread_mutex_lock(&(nat->lock));
+  pthread_mutex_t lock = get_type_lock(nat, type);
+  pthread_mutex_lock(&(lock));
 
   /* handle insert here, create a mapping, and then return a copy of it */
   struct sr_nat_mapping *copy = malloc(sizeof(struct sr_nat_mapping));
 
   /* Can't just call sr_nat_lookup_internal here, will cause deadlock */
   struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_internal_ptr(nat, ip_int, aux_int, type);
+  struct sr_nat_mapping *head_mapping = get_type_mapping(nat, type);
 
   /* If the mapping does not exists, create the mapping */
   if (mapping_ptr == NULL) {
     mapping_ptr = sr_nat_create_mapping(nat, ip_int, aux_int, type);
-    mapping_ptr->next = nat->mappings;
-    nat->mappings = mapping_ptr;
+    mapping_ptr->next = head_mapping;
+    head_mapping = mapping_ptr;
   }
 
   /* Create a copy of the mapping */
   memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
 
-  pthread_mutex_unlock(&(nat->lock));
+  pthread_mutex_unlock(&(lock));
   return copy;
 }
 
@@ -313,22 +327,13 @@ struct sr_nat_mapping *sr_nat_create_mapping(struct sr_nat *nat,
 uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type){
 
   /* Get the mapping based on type */
-  struct sr_aux_ext_mapping_wrap *aux_ext_mapping = NULL;
-  uint16_t end_aux;
-  uint16_t start_aux;
+  struct sr_nat_mapping *map_walker = get_type_mapping(nat, type);
 
   if (type == nat_mapping_tcp) {
-    aux_ext_mapping = nat->tcp_port_mapping;
-    start_aux = htons(START_PORT);
-    end_aux = htons(END_PORT);
+    map_walker = nat->tcp_mappings;
   } else {
-    aux_ext_mapping = nat->icmp_id_mapping;
-    start_aux = htons(START_ID);
-    end_aux = htons(END_ID);
+    map_walker = nat->icmp_mappings;
   }
-
-  /* Search through the unique mapping */
-  struct sr_aux_ext_mapping *map_walker = aux_ext_mapping->mappings;
 
   while (map_walker) {
     if(map_walker->ip_int == ip_int && map_walker->aux_int == aux_int) {
@@ -337,30 +342,44 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
     map_walker = map_walker->next;
   }
 
-  /* TODO: Determine if the extra lists are needed  */
-  /* If no mapping found, create mapping and assign the current available port/id */
-  struct sr_aux_ext_mapping *new_mapping = malloc(sizeof(struct sr_aux_ext_mapping));
-  new_mapping->ip_int = ip_int;
-  new_mapping->aux_int = aux_int;
-  new_mapping->aux_ext = aux_ext_mapping->current_aux;
-  new_mapping->next = aux_ext_mapping->mappings;
+  if (type == nat_mapping_tcp) {
+    return get_unique_aux_icmp(nat);
+  } else {
+    return get_unique_aux_tcp(nat);
+  }
+}
 
-  /* Update the mapping */
-  aux_ext_mapping->mappings = new_mapping;
-  aux_ext_mapping->current_aux = htons(ntohs(aux_ext_mapping->current_aux) + 1);
+uint16_t get_unique_aux_icmp(struct sr_nat *nat) {
+  uint16_t start_aux = htons(START_ID);
+  uint16_t end_aux = htons(END_ID);
+  uint16_t new_aux = htons(ntohs(nat->aux_icmp) + 1);
 
   /* Rollover the auxiliary Id if it exceeds the limit */
-  if (ntohs(aux_ext_mapping->current_aux) > ntohs(end_aux)) {
-    aux_ext_mapping->current_aux = start_aux;
+  if (ntohs(new_aux) > ntohs(end_aux)) {
+    new_aux = start_aux;
   }
+  nat->aux_icmp = new_aux;
 
-  return new_mapping->aux_ext;
+  return new_aux;
+}
+
+uint16_t get_unique_aux_tcp(struct sr_nat *nat) {
+  uint16_t start_aux = htons(START_PORT);
+  uint16_t end_aux = htons(END_PORT);
+  uint16_t new_aux = htons(ntohs(nat->aux_tcp) + 1);
+
+  if (ntohs(new_aux) > ntohs(end_aux)) {
+    new_aux = start_aux;
+  }
+  nat->aux_tcp = new_aux;
+
+  return new_aux;
 }
 
 
 void update_tcp_connection_internal(struct sr_nat *nat, sr_ip_hdr_t *ip_hdr, sr_tcp_hdr_t *tcp_hdr) {
 
-  pthread_mutex_lock(&(nat->lock));
+  pthread_mutex_lock(&(nat->tcp_lock));
 
   uint32_t ip_int = ip_hdr->ip_src;
   uint16_t aux_int = tcp_hdr->port_src;
@@ -371,12 +390,12 @@ void update_tcp_connection_internal(struct sr_nat *nat, sr_ip_hdr_t *ip_hdr, sr_
     update_tcp_connection(mapping_ptr, ip_hdr, tcp_hdr);
   }
 
-  pthread_mutex_unlock(&(nat->lock));
+  pthread_mutex_unlock(&(nat->tcp_lock));
 }
 
 void update_tcp_connection_external(struct sr_nat *nat, sr_ip_hdr_t *ip_hdr, sr_tcp_hdr_t *tcp_hdr) {
 
-  pthread_mutex_lock(&(nat->lock));
+  pthread_mutex_lock(&(nat->tcp_lock));
 
   uint16_t aux_ext = tcp_hdr->port_dst;
 
@@ -386,7 +405,7 @@ void update_tcp_connection_external(struct sr_nat *nat, sr_ip_hdr_t *ip_hdr, sr_
     update_tcp_connection(mapping_ptr, ip_hdr, tcp_hdr);
   }
 
-  pthread_mutex_unlock(&(nat->lock));
+  pthread_mutex_unlock(&(nat->tcp_lock));
 }
 
 
@@ -488,6 +507,22 @@ struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, uint32_t i
   }
 
   return NULL;
+}
+
+struct sr_nat_mapping *get_type_mapping(struct sr_nat* nat, sr_nat_mapping_type type) {
+  if (type == nat_mapping_icmp) {
+    return nat->icmp_mappings;
+  } else {
+    return nat->tcp_mappings;
+  }
+}
+
+pthread_mutex_t get_type_lock(struct sr_nat* nat, sr_nat_mapping_type type) {
+  if (type == nat_mapping_icmp) {
+    return nat->icmp_lock;
+  } else {
+    return nat->tcp_lock;
+  }
 }
 
 

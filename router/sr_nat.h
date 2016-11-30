@@ -64,29 +64,19 @@ struct sr_nat_mapping {
   struct sr_nat_mapping *next;
 };
 
-struct sr_aux_ext_mapping_wrap {
-  uint16_t current_aux;
-  struct sr_aux_ext_mapping *mappings;
-};
-
-struct sr_aux_ext_mapping {
-  uint32_t ip_int; /* internal ip addr */
-  uint16_t aux_int; /* internal port or icmp id */
-  uint16_t aux_ext; /* external port or icmp id */
-  struct sr_aux_ext_mapping *next;
-};
-
 struct sr_nat {
   int is_active;
 
   /* threading */
-  pthread_mutex_t lock;
+  pthread_mutex_t icmp_lock;
+  pthread_mutex_t tcp_lock;
   pthread_mutexattr_t attr;
   pthread_attr_t thread_attr;
   pthread_t thread;
 
-  /* add any fields here */
-  struct sr_nat_mapping *mappings;
+  /* Use two different mappings in order to handle logic of tcp and icmp separately */
+  struct sr_nat_mapping *tcp_mappings;
+  struct sr_nat_mapping *icmp_mappings;
 
   uint32_t icmp_query_timeout;
   uint32_t tcp_established_idle_timeout;
@@ -96,9 +86,9 @@ struct sr_nat {
   uint32_t external_if_ip;
   uint32_t internal_if_ip;
 
-  /* unique mapping of (internal IP + aux_int) to aux_ext */
-  struct sr_aux_ext_mapping_wrap *tcp_port_mapping;
-  struct sr_aux_ext_mapping_wrap *icmp_id_mapping;
+  /* Largest active id */
+  uint16_t aux_tcp;
+  uint16_t aux_icmp;
 };
 
 int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
@@ -107,7 +97,7 @@ int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
 void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
 
 /* deletes connections from a nat connection struct*/
-void timeout_mapping(struct sr_nat* nat);
+void timeout_mapping(struct sr_nat* nat, sr_nat_mapping_type type);
 /* check if tcp connectino expired*/
 int  tcp_connection_expired(struct sr_nat* nat, struct sr_nat_connection* connection);
 
@@ -142,6 +132,10 @@ struct sr_nat_mapping *sr_nat_lookup_internal_ptr(struct sr_nat *nat,
 uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, 
   uint16_t aux_int, sr_nat_mapping_type type);
 
+uint16_t get_unique_aux_icmp(struct sr_nat *nat);
+
+uint16_t get_unique_aux_tcp(struct sr_nat *nat);
+
 struct sr_nat_connection* create_and_insert_nat_connection(struct sr_nat_mapping *map, uint32_t ip_ext, 
   uint16_t aux_ext, uint32_t ip_remote, uint16_t aux_remote);
 
@@ -166,6 +160,10 @@ struct sr_nat_connection* lookup_tcp_connection_ptr(struct sr_nat_mapping *map, 
   uint32_t ip_ext, uint16_t aux_ext);
 
 struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, uint32_t ip_remote, uint16_t aux_remote);
+
+struct sr_nat_mapping *get_type_mapping(struct sr_nat* nat, sr_nat_mapping_type type);
+
+pthread_mutex_t get_type_lock(struct sr_nat* nat, sr_nat_mapping_type type);
 
 uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet);
 void print_nat_mapping(uint8_t *buf);

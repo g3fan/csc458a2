@@ -177,6 +177,7 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_wrapper.packet, icmp_wrapper.len);
     }
 
+    free(arp_entry);
     free(icmp_wrapper.packet);
   }
 }
@@ -438,7 +439,7 @@ void *unsolicited_syn_thread(void* input) {
 
   time_t curtime = time(NULL);
   sleep(6.0);
-  struct sr_nat_mapping* curr_map = nat->mappings;
+  struct sr_nat_mapping* curr_map = nat->tcp_mappings;
   
   int success = 0;
 

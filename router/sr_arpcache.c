@@ -84,9 +84,9 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
                 
                 packet = packet->next;
 
-                free(sendEthernet.packet);
-                free(sendIPHeader.packet);
                 free(sendICMPPacket.packet);
+                free(sendIPHeader.packet);
+                free(sendEthernet.packet);
             }
             sr_arpreq_destroy(&sr->cache, req);
         } else {

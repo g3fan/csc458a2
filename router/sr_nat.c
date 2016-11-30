@@ -27,7 +27,6 @@ int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
   pthread_attr_init(&(nat->thread_attr));
   pthread_attr_setdetachstate(&(nat->thread_attr), PTHREAD_CREATE_JOINABLE);
   pthread_attr_setscope(&(nat->thread_attr), PTHREAD_SCOPE_SYSTEM);
-  pthread_attr_setscope(&(nat->thread_attr), PTHREAD_SCOPE_SYSTEM);
   pthread_create(&(nat->thread), &(nat->thread_attr), sr_nat_timeout, nat);
 
   /* CAREFUL MODIFYING CODE ABOVE THIS LINE! */
@@ -48,17 +47,39 @@ int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
 }
 
 int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
+  struct sr_nat_mapping *map, *map_nxt;
+  struct sr_nat_connection *conn, *conn_next;
 
   pthread_mutex_lock(&(nat->tcp_lock));
+    for (map = nat->tcp_mappings; map; map = map_nxt) {
+      for (conn = map->conns; conn; conn = conn_next) {
+        conn_next = conn->next;
+        free(conn);
+      }
+
+      map_nxt = map->next;
+      free(map);
+    }
+  pthread_mutex_unlock(&(nat->tcp_lock));
+
+
   pthread_mutex_lock(&(nat->icmp_lock));
+    for (map = nat->icmp_mappings; map; map = map_nxt) {
+      for (conn = map->conns; conn; conn = conn_next) {
+        conn_next = conn->next;
+        free(conn);
+      }
+
+      map_nxt = map->next;
+      free(map);
+    }
+  pthread_mutex_unlock(&(nat->icmp_lock));
 
   /* free nat memory here */
-
   pthread_kill(nat->thread, SIGKILL);
   return pthread_mutex_destroy(&(nat->tcp_lock)) &&
     pthread_mutex_destroy(&(nat->icmp_lock)) &&
     pthread_mutexattr_destroy(&(nat->attr));
-
 }
 
 void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
@@ -69,7 +90,6 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
   time_t curtime;
   while (1) {
     sleep(1.0);
-
     pthread_mutex_lock(&(nat->icmp_lock));
     curtime = time(NULL);
     curr_map = nat->icmp_mappings;
@@ -265,8 +285,7 @@ struct sr_nat_mapping *sr_nat_lookup_internal_ptr(struct sr_nat *nat,
   struct sr_nat_mapping *map_walker = get_type_mapping(nat, type);
 
   while(map_walker){
-    if(map_walker->type == type && map_walker->aux_int == aux_int &&
-      map_walker->ip_int == ip_int){
+    if(map_walker->aux_int == aux_int && map_walker->ip_int == ip_int){
       break;
     }
     map_walker = map_walker->next;
@@ -347,9 +366,9 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
   }
 
   if (type == nat_mapping_tcp) {
-    return get_unique_aux_icmp(nat);
-  } else {
     return get_unique_aux_tcp(nat);
+  } else {
+    return get_unique_aux_icmp(nat);
   }
 }
 
@@ -538,7 +557,7 @@ uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet) {
     return ip_hdr->ip_src;
   }
 
-  struct sr_nat_mapping *mapping;
+  struct sr_nat_mapping *mapping = NULL;
   uint32_t nat_ip_src = ip_hdr->ip_src;
   uint16_t aux_ext;
   sr_nat_mapping_type type;

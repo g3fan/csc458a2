@@ -85,6 +85,7 @@ void sr_handlepacket(struct sr_instance* sr,
 
   /* If receive an ARP packet and we are recipient*/
   if (ethernet_hdr->ether_type == htons(ethertype_arp) && sr_is_packet_recipient(sr, arp_hdr->ar_tip)) {
+
     /* If ARP request, reply with our mac address*/
     if (arp_hdr->ar_op == htons(arp_op_request)) {
       sr_handle_arp_request(sr, ethernet_hdr, arp_hdr, incoming_interface);
@@ -93,11 +94,11 @@ void sr_handlepacket(struct sr_instance* sr,
       all Gorden's function*/
       receivedARPReply(sr, arp_hdr);
     }
-    free(arp_hdr);
   } else if (ethernet_hdr->ether_type == htons(ethertype_ip)) {
     /* If receive an IP packet*/
     unsigned int ip_packet_len = len - sizeof(struct sr_ethernet_hdr);
     uint8_t *ip_packet = sr_copy_ip_packet((uint8_t *) ethernet_hdr, ip_packet_len);
+
     /* Check if the received packet is valid, if not drop the packet*/
     if (sr_ip_packet_is_valid(ip_packet, ip_packet_len)) {
       if (sr_nat_is_packet_recipient(sr, incoming_interface, ip_packet)) {
@@ -106,9 +107,11 @@ void sr_handlepacket(struct sr_instance* sr,
         sr_handle_packet_forward(sr, incoming_interface, ethernet_hdr, ip_packet);
       }
     }
-    /* Check if we are recipient of the packet*/
+
     free(ip_packet);
   }
+
+  free(arp_hdr);
   free(ethernet_hdr);
   free(incoming_interface);
 }/* end sr_handlepacket */
@@ -136,6 +139,7 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
   uint8_t* eth_src = ethernet_hdr->ether_dhost;
   uint8_t* eth_dest = ethernet_hdr->ether_shost;
   sr_object_t icmp_wrapper;
+  icmp_wrapper.packet = NULL;
 
   /* Return a port unreachable for UDP or TCP type packets through a icmp_t3_header*/
   if (ip_hdr->ip_p == ip_protocol_tcp || ip_hdr->ip_p == ip_protocol_udp) {
@@ -177,7 +181,9 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_wrapper.packet, icmp_wrapper.len);
     }
 
-    free(arp_entry);
+    if (arp_entry) {
+      free(arp_entry);
+    }
     free(icmp_wrapper.packet);
   }
 }
@@ -240,6 +246,8 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
     /* Send ICMP time exceeded*/
     sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_time_exceeded, icmp_code_0, ip_packet);
     createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
+
+    free(icmp_t3_wrapper.packet);
   } else {
     /* Re-determine forwarding interfaces for packet after possible NAT translation */
     struct sr_rt* forward_rt = get_longest_prefix_match_interface(sr->routing_table, forwarding_ip_hdr->ip_dst);
@@ -248,6 +256,8 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
       /* Send ICMP network unreachable if the ip cannot be identified through our routing table */
       sr_object_t icmp_t3_wrapper = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_0, ip_packet);
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
+
+      free(icmp_t3_wrapper.packet);
     } else {
       /* Check if the destination is in the arp cache */
       struct sr_arpentry *arp_entry = sr_arpcache_lookup(&(sr->cache), forwarding_ip_hdr->ip_dst);
@@ -312,6 +322,8 @@ void queue_ethernet_packet(struct sr_instance *sr, uint8_t *ip_packet, unsigned 
   free(placeholder_ether_shost);
 
   sr_arpcache_queuereq(&(sr->cache), ip_hdr->ip_dst, ethernet_packet.packet, ethernet_packet.len, rt->interface);
+
+  free(ethernet_packet.packet);
 }
 
 /* Create an Ethernet packet and send it, len = size of data in bytes*/
@@ -319,9 +331,7 @@ void sr_create_send_ethernet_packet(struct sr_instance* sr, uint8_t* ether_shost
   char* outgoing_interface = get_interface_from_mac(ether_shost, sr);
   sr_object_t ethernet_packet = create_ethernet_packet(ether_shost, ether_dhost, ethertype, data, len);
 
-  sr_send_packet(sr, ethernet_packet.packet, 
-                ethernet_packet.len, 
-                outgoing_interface);
+  sr_send_packet(sr, ethernet_packet.packet, ethernet_packet.len, outgoing_interface);
 
   free(ethernet_packet.packet);
 }
@@ -344,6 +354,7 @@ void createAndSendIPPacket(struct sr_instance* sr, uint32_t ip_src, uint32_t ip_
 
   sr_send_packet(sr, eth_wrapper.packet, eth_wrapper.len, get_interface_from_mac(eth_src, sr));
 
+  free(ip_wrapper.packet);
   free(eth_wrapper.packet);
 }
 
@@ -427,7 +438,7 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
 }
 
 void handle_unsolicited_syn(struct sr_instance* sr, uint8_t* packet){
-  pthread_t  syn_thread;
+  pthread_t syn_thread;
   pthread_attr_t syn_thread_attr;
   pthread_attr_init(&syn_thread_attr);
   pthread_attr_setdetachstate(&syn_thread_attr , PTHREAD_CREATE_DETACHED);
@@ -479,6 +490,10 @@ void *unsolicited_syn_thread(void* input) {
                                                                     ethertype_ip, IPPacket.packet, IPPacket.len);
                   
     sr_send_packet(sr, sendEthernet.packet, sendEthernet.len, targetInterface->name);
+
+    free(icmpPacket.packet);
+    free(IPPacket.packet);
+    free(sendEthernet.packet);
   }
   return 0;
 }

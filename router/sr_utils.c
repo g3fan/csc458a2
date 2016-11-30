@@ -66,6 +66,9 @@ sr_object_t create_icmp_packet(uint8_t type, uint8_t code, uint8_t* data, unsign
   /* Set checksum after combining the data as the icmp checksum has to account for its misc. payload */
   sr_icmp_hdr_t *combined_header = (sr_icmp_hdr_t *)combined_packet.packet;
   combined_header->icmp_sum = cksum(combined_packet.packet, combined_packet.len);
+
+  free(icmp_header);
+
   return combined_packet;
 }
 
@@ -90,23 +93,26 @@ sr_object_t create_icmp_t3_packet(uint8_t icmp_type, uint8_t icmp_code, uint8_t*
 sr_object_t create_ip_packet(uint8_t protocol, uint32_t ip_src, uint32_t ip_dst, uint8_t* data, unsigned int len) {
 
   unsigned int ip_hdr_size = sizeof(sr_ip_hdr_t);
-  sr_ip_hdr_t* output = malloc(ip_hdr_size); 
-  output->ip_v = 4;
-  output->ip_hl = 5;
-  output->ip_tos = 0; /* Best effort*/
-  output->ip_len = htons(ip_hdr_size + len); /* Total length of header and data */
-  output->ip_id = htons(0); /* No ip fragments */
-  output->ip_off = htons(IP_DF); /* No ip fragments(offset) */
-  output->ip_ttl = INIT_TTL;
-  output->ip_p = protocol;
-  output->ip_src = ip_src; 
-  output->ip_dst = ip_dst;
-  output->ip_sum = htons(0);
+  sr_ip_hdr_t* ip_header = malloc(ip_hdr_size); 
+  ip_header->ip_v = 4;
+  ip_header->ip_hl = 5;
+  ip_header->ip_tos = 0; /* Best effort*/
+  ip_header->ip_len = htons(ip_hdr_size + len); /* Total length of header and data */
+  ip_header->ip_id = htons(0); /* No ip fragments */
+  ip_header->ip_off = htons(IP_DF); /* No ip fragments(offset) */
+  ip_header->ip_ttl = INIT_TTL;
+  ip_header->ip_p = protocol;
+  ip_header->ip_src = ip_src; 
+  ip_header->ip_dst = ip_dst;
+  ip_header->ip_sum = htons(0);
 
-  uint16_t checksum = cksum(output, ip_hdr_size);
-  output->ip_sum = checksum;
+  uint16_t checksum = cksum(ip_header, ip_hdr_size);
+  ip_header->ip_sum = checksum;
+
+  sr_object_t packet = create_combined_packet((uint8_t *) ip_header, ip_hdr_size, data, len);
+  free(ip_header);
   
-  return create_combined_packet((uint8_t *) output, ip_hdr_size, data, len);
+  return packet;
 }
 
 /* Set source ip, source MAC and target MAC of the ARP response header*/
@@ -133,7 +139,10 @@ sr_object_t create_ethernet_packet(uint8_t* ether_shost, uint8_t* ether_dhost, u
   memcpy(output->ether_shost, ether_shost, ETHER_ADDR_LEN);
   output->ether_type = htons(ethertype);
 
-  return create_combined_packet((uint8_t *) output, ethernet_hdr_size, data, len);
+  sr_object_t packet = create_combined_packet((uint8_t *) output, ethernet_hdr_size, data, len);
+  free(output);
+
+  return packet;
 }
 
 sr_object_t create_tcp_pseudo_hdr(uint32_t ip_src, uint32_t ip_dst, uint16_t tcp_length) {
@@ -159,11 +168,12 @@ sr_object_t create_packet(uint8_t *packet, unsigned int len) {
 sr_object_t create_combined_packet(uint8_t *hdr, unsigned int hdr_len, uint8_t *data, unsigned int data_len) {
   sr_object_t output;
   uint8_t *combinedPacket = malloc(hdr_len + data_len);
+  memcpy(combinedPacket, hdr, hdr_len);
+  memcpy(combinedPacket + hdr_len, data, data_len);
+  
   output.packet = combinedPacket;
   output.len = hdr_len + data_len;
 
-  memcpy(combinedPacket, hdr, hdr_len);
-  memcpy(combinedPacket + hdr_len, data, data_len);
   return output;
 }
    

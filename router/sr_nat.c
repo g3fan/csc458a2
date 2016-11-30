@@ -107,7 +107,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
       curr_map = curr_map->next;
     }
 
-    timeout_mapping(nat, nat_mapping_icmp);
+    timeout_mapping(nat, nat_mapping_tcp);
     pthread_mutex_unlock(&(nat->tcp_lock));
   }
   return NULL;
@@ -328,12 +328,6 @@ uint16_t get_unique_aux_ext(struct sr_nat *nat, uint32_t ip_int, uint16_t aux_in
 
   /* Get the mapping based on type */
   struct sr_nat_mapping *map_walker = get_type_mapping(nat, type);
-
-  if (type == nat_mapping_tcp) {
-    map_walker = nat->tcp_mappings;
-  } else {
-    map_walker = nat->icmp_mappings;
-  }
 
   while (map_walker) {
     if(map_walker->ip_int == ip_int && map_walker->aux_int == aux_int) {

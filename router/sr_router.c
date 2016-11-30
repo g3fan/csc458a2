@@ -196,21 +196,26 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   uint8_t* eth_dest = ethernet_hdr->ether_shost;
   int forwardNATPacket = 0;
 
-  /* Get the MAC address of next hub */
-  struct sr_rt* forward_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_dst);
-
   /* Apply NAT logic to the packet if it is active */
-  if (sr->nat->is_active && ip_hdr->ip_ttl > 1 && forward_rt != NULL) {
-    struct sr_if *forward_interface = sr_get_interface(sr, forward_rt->interface);
-     /* NAT is only used in certain cases
-        This occurs when, 1. Internal(source) to external(destination) interface
-                          2. External(source) to the external NAT interface (destination) */
-    if ((sr_is_interface_internal(reply_interface) && sr_is_interface_external(forward_interface)) ||
-     (sr_is_interface_external(reply_interface) && ip_hdr->ip_dst == sr->nat->external_if_ip)) {
+  if (sr->nat->is_active && ip_hdr->ip_ttl > 1) {
+    /* NAT is only used in certain cases
+       This occurs when, 1. Internal(source) to external(destination) interface
+                         2. External(source) to the external NAT interface (destination) */
+    if (sr_is_interface_external(reply_interface) && ip_hdr->ip_dst == sr->nat->external_if_ip) {
+      forwardNATPacket = 1;
+    } else {
+      struct sr_rt* forward_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_dst);
 
+      if (forward_rt != NULL) {
+        struct sr_if *forward_interface = sr_get_interface(sr, forward_rt->interface);
+
+        forwardNATPacket = sr_is_interface_internal(reply_interface) && sr_is_interface_external(forward_interface);
+      }
+    }
+
+    if (forwardNATPacket) {
       uint8_t *nat_packet = malloc(ip_hdr->ip_len);
       memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
-      forwardNATPacket = 1;
 
       if (sr_is_interface_internal(incoming_interface)) {
         forwardNATPacket = sr_nat_handle_internal(sr, nat_packet);
@@ -236,7 +241,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
     createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
   } else {
     /* Re-determine forwarding interfaces for packet after possible NAT translation */
-    forward_rt = get_longest_prefix_match_interface(sr->routing_table, forwarding_ip_hdr->ip_dst);
+    struct sr_rt* forward_rt = get_longest_prefix_match_interface(sr->routing_table, forwarding_ip_hdr->ip_dst);
     
     if (forward_rt == NULL) {
       /* Send ICMP network unreachable if the ip cannot be identified through our routing table */

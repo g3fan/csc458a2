@@ -150,15 +150,14 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
     /* Return a echo reply for echo request*/
     unsigned int headers_size = sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_hdr_t);
     uint8_t* icmp_payload = ip_packet + headers_size;
-    icmp_wrapper = create_icmp_packet(icmp_type_echo_reply, icmp_code_0, icmp_payload, ntohs(ip_hdr->ip_len) - headers_size);
+    unsigned int icmp_payload_len = ntohs(ip_hdr->ip_len) - headers_size;
+    icmp_wrapper = create_icmp_packet(icmp_type_echo_reply, icmp_code_0, icmp_payload, icmp_payload_len);
   }
 
   /* Only perform replies when handling a valid reply action */
   if (icmp_wrapper.packet != NULL) {
     /* Determine the destination to reply to first through the arp cache */
     struct sr_rt* longestPrefixIPMatch = get_longest_prefix_match_interface(sr->routing_table,ip_hdr->ip_src);
-    uint32_t nextHopIP = longestPrefixIPMatch->gw.s_addr;
-    struct sr_arpentry *arp_entry = sr_arpcache_lookup(&(sr->cache), nextHopIP);
 
     /* Send destination unreachable if reply destination is not in the forwarding table */
     if (longestPrefixIPMatch == NULL) {
@@ -166,28 +165,31 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
       createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
 
       free(icmp_t3_wrapper.packet);
-    } else if (arp_entry == NULL) {
-      /* Send an arp request if we do not have the reply destination cached */
-      sr_object_t ip_wrapper = create_ip_packet(ip_protocol_icmp, ip_src, ip_dest, icmp_wrapper.packet, icmp_wrapper.len);
-      sr_object_t eth_wrapper = create_ethernet_packet(eth_src, eth_dest, ethertype_ip, ip_wrapper.packet, ip_wrapper.len);
-      sr_arpcache_queuereq(&(sr->cache), nextHopIP, eth_wrapper.packet, eth_wrapper.len, longestPrefixIPMatch->interface);
-
-      free(ip_wrapper.packet);
-      free(eth_wrapper.packet);
     } else {
-      /* Send out reply normally if the destination is cached */
-      struct sr_if* outgoing_interface = sr_get_interface(sr, longestPrefixIPMatch->interface);
-      eth_src = outgoing_interface->addr;
-      eth_dest = arp_entry->mac;
+      uint32_t nextHopIP = longestPrefixIPMatch->gw.s_addr;
+      struct sr_arpentry *arp_entry = sr_arpcache_lookup(&(sr->cache), nextHopIP);
 
-      createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_wrapper.packet, icmp_wrapper.len);
-    }
+      if (arp_entry == NULL) {
+        /* Send an arp request if we do not have the reply destination cached */
+        sr_object_t ip_wrapper = create_ip_packet(ip_protocol_icmp, ip_src, ip_dest, icmp_wrapper.packet, icmp_wrapper.len);
+        sr_object_t eth_wrapper = create_ethernet_packet(eth_src, eth_dest, ethertype_ip, ip_wrapper.packet, ip_wrapper.len);
+        sr_arpcache_queuereq(&(sr->cache), nextHopIP, eth_wrapper.packet, eth_wrapper.len, longestPrefixIPMatch->interface);
 
-    if (arp_entry) {
-      free(arp_entry);
+        free(ip_wrapper.packet);
+        free(eth_wrapper.packet);
+      } else {
+        /* Send out reply normally if the destination is cached */
+        struct sr_if* outgoing_interface = sr_get_interface(sr, longestPrefixIPMatch->interface);
+        eth_src = outgoing_interface->addr;
+        eth_dest = arp_entry->mac;
+
+        createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_wrapper.packet, icmp_wrapper.len);
+        free(arp_entry);
+      }
     }
-    free(icmp_wrapper.packet);
   }
+
+  free(icmp_wrapper.packet);
 }
 
 void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_interface,
@@ -198,6 +200,11 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   /* Initialize packet src/dest with 'reply' type values before NAT is applied as multiple cases involve sending back an
      icmp packet to the original source */
   struct sr_rt* reply_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
+
+  if (reply_rt == NULL) {
+    return;
+  }
+
   struct sr_if *reply_interface = sr_get_interface(sr, reply_rt->interface);
   uint32_t ip_dest = ip_hdr->ip_src;
   uint32_t ip_src = reply_interface->ip;
@@ -317,16 +324,18 @@ void queue_ethernet_packet(struct sr_instance *sr, uint8_t *ip_packet, unsigned 
 
   struct sr_rt* rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_dst);
 
-  /* Holds the original ethernet address of sender in case of arp cache misses, resulting in sending
-     back host unreachable*/
-  uint8_t* placeholder_ether_shost = malloc(6);
-  memcpy(placeholder_ether_shost, original_eth_shost, 6);
-  sr_object_t ethernet_packet = create_ethernet_packet(placeholder_ether_shost, placeholder_ether_shost, ethertype_ip, ip_packet, ip_packet_len);
-  free(placeholder_ether_shost);
+  if (rt != NULL) {
+    /* Holds the original ethernet address of sender in case of arp cache misses, resulting in sending
+       back host unreachable*/
+    uint8_t* placeholder_ether_shost = malloc(6);
+    memcpy(placeholder_ether_shost, original_eth_shost, 6);
+    sr_object_t ethernet_packet = create_ethernet_packet(placeholder_ether_shost, placeholder_ether_shost, ethertype_ip, ip_packet, ip_packet_len);
+    free(placeholder_ether_shost);
 
-  sr_arpcache_queuereq(&(sr->cache), ip_hdr->ip_dst, ethernet_packet.packet, ethernet_packet.len, rt->interface);
+    sr_arpcache_queuereq(&(sr->cache), ip_hdr->ip_dst, ethernet_packet.packet, ethernet_packet.len, rt->interface);
 
-  free(ethernet_packet.packet);
+    free(ethernet_packet.packet);
+  }
 }
 
 /* Create an Ethernet packet and send it, len = size of data in bytes*/
@@ -482,22 +491,25 @@ void *unsolicited_syn_thread(void* input) {
   if (!success) { /*send ICMP port unreachable*/
 
     struct sr_rt* targetRT = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
-    struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
 
-    sr_object_t icmpPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, packet);
-    sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat.external_if_ip, 
-                                            ip_hdr->ip_src, icmpPacket.packet, icmpPacket.len);
-    
-    struct sr_if* source_interface = sr_get_interface(sr, externalInterface);
+    if (targetRT != NULL) {
+      struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
 
-    sr_object_t sendEthernet = create_ethernet_packet( targetInterface->addr, (uint8_t*)source_interface->addr,
-                                                                    ethertype_ip, IPPacket.packet, IPPacket.len);
-                  
-    sr_send_packet(sr, sendEthernet.packet, sendEthernet.len, targetInterface->name);
+      sr_object_t icmpPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, packet);
+      sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat.external_if_ip, 
+                                              ip_hdr->ip_src, icmpPacket.packet, icmpPacket.len);
+      
+      struct sr_if* source_interface = sr_get_interface(sr, externalInterface);
 
-    free(icmpPacket.packet);
-    free(IPPacket.packet);
-    free(sendEthernet.packet);
+      sr_object_t sendEthernet = create_ethernet_packet( targetInterface->addr, (uint8_t*)source_interface->addr,
+                                                                      ethertype_ip, IPPacket.packet, IPPacket.len);
+                    
+      sr_send_packet(sr, sendEthernet.packet, sendEthernet.len, targetInterface->name);
+
+      free(icmpPacket.packet);
+      free(IPPacket.packet);
+      free(sendEthernet.packet);
+    }
   }
   return 0;
 }

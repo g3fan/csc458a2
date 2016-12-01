@@ -58,8 +58,8 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
                 uint32_t ip_src = currIPHdr->ip_src;
 
                 /* Retrieve the original source ip of packets that may have undergone NAT */
-                if (sr->nat->is_active) {
-                    ip_src = get_nat_ip_src(sr->nat, ip_packet);
+                if (sr->nat.is_active) {
+                    ip_src = get_nat_ip_src(&(sr->nat), ip_packet);
                 }
 
                 if (sr_is_packet_recipient(sr, ip_src)) {

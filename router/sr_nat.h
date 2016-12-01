@@ -91,7 +91,7 @@ struct sr_nat {
   uint16_t aux_icmp;
 };
 
-int   sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
+int   sr_nat_init(struct sr_nat *nat, int is_active, uint32_t icmp_query_timeout,
 uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout);     /* Initializes the nat */
 int   sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
 void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
@@ -163,7 +163,7 @@ struct sr_nat_connection* find_connection(struct sr_nat_mapping *map, uint32_t i
 
 struct sr_nat_mapping *get_type_mapping(struct sr_nat* nat, sr_nat_mapping_type type);
 
-pthread_mutex_t get_type_lock(struct sr_nat* nat, sr_nat_mapping_type type);
+pthread_mutex_t *get_type_lock(struct sr_nat* nat, sr_nat_mapping_type type);
 
 uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet);
 void print_nat_mapping(uint8_t *buf);

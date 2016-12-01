@@ -221,8 +221,9 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
     }
 
     if (forwardNATPacket) {
-      uint8_t *nat_packet = malloc(ip_hdr->ip_len);
-      memcpy(nat_packet, ip_packet, ip_hdr->ip_len);
+      unsigned int ip_packet_len = ntohs(ip_hdr->ip_len);
+      uint8_t *nat_packet = malloc(ip_packet_len);
+      memcpy(nat_packet, ip_packet, ip_packet_len);
 
       if (sr_is_interface_internal(incoming_interface)) {
         forwardNATPacket = sr_nat_handle_internal(sr, nat_packet);
@@ -407,9 +408,9 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)ip_packet;
 
   if (sr->nat->is_active) {
-
     uint16_t id = 0;
     sr_nat_mapping_type type;
+
     if(ip_hdr->ip_p == ip_protocol_icmp){
       sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
       id =  icmp_hdr->id;
@@ -420,6 +421,7 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
       id =  tcp_hdr->port_dst;
       type = nat_mapping_tcp;
     }
+
     /* Packets from external sources to the router without a NAT mapping are determined to be
        for the router */
     if (sr_is_interface_external(interface)) {

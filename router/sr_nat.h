@@ -13,7 +13,7 @@
 #include "sr_utils.h"
 
 #define sr_IFACE_NAMELEN 32
-#define START_PORT 1025
+#define START_PORT 1024
 #define END_PORT 65535
 #define START_ID 1
 #define END_ID 65535

@@ -188,20 +188,27 @@ struct sr_tcp_hdr {
   uint16_t port_dst;
   uint32_t seq_num;
   uint32_t ack_num;
-  uint8_t protocol;
-  unsigned int offset:4;
-  unsigned int reserved:3;
-  unsigned int ecn:3;
-  unsigned int urg:1;
-  unsigned int ack:1;
-  unsigned int psh:1;
-  unsigned int rst:1;
-  unsigned int syn:1;
+  #if __BYTE_ORDER == __LITTLE_ENDIAN
+    unsigned int reserved:4;
+    unsigned int offset:4;
+  #elif __BYTE_ORDER == __BIG_ENDIAN
+    unsigned int offset:4;
+    unsigned int reserved:4;
+  #else
+  #error "Byte ordering ot specified " 
+  #endif 
   unsigned int fin:1;
+  unsigned int syn:1;
+  unsigned int rst:1;
+  unsigned int psh:1;
+  unsigned int ack:1;
+  unsigned int urg:1;
+  unsigned int ece:1;
+  unsigned int cwr:1;
   uint16_t window;
   uint16_t tcp_sum;
   uint16_t urgent;
-  uint32_t options;
+  /* uint32_t options; Recheck protocol requirements */
 } __attribute__ ((packed)) ;
 typedef struct sr_tcp_hdr sr_tcp_hdr_t;
 

@@ -47,7 +47,7 @@ extern char* optarg;
 #define DEFAULT_TOPO 0
 
 static void usage(char* );
-static void sr_init_instance(struct sr_instance*, struct sr_nat*);
+static void sr_init_instance(struct sr_instance*);
 static void sr_destroy_instance(struct sr_instance* );
 static void sr_set_user(struct sr_instance* );
 static void sr_load_rt_wrap(struct sr_instance* sr, char* rtable);
@@ -69,7 +69,6 @@ int main(int argc, char **argv)
     struct sr_instance sr;
 
     int useNat = 0;
-    struct sr_nat nat;
     unsigned int  icmp_timeout = 60;
     unsigned int  tcp_established_timeout = 7440;
     unsigned int  tcp_transitory_timeout = 300;
@@ -123,14 +122,8 @@ int main(int argc, char **argv)
         } /* switch */
     } /* -- while -- */
 
-    if (useNat) {
-        sr_nat_init(&nat, icmp_timeout, tcp_established_timeout, tcp_transitory_timeout);
-    } else {
-        nat.is_active = 0;
-    }
-
     /* -- zero out sr instance -- */
-    sr_init_instance(&sr, &nat);
+    sr_init_instance(&sr);
 
     /* -- set up routing table from file -- */
     if(template == NULL) {
@@ -182,7 +175,7 @@ int main(int argc, char **argv)
     }
 
     /* call router init (for arp subsystem etc.) */
-    sr_init(&sr);
+    sr_init(&sr, useNat, icmp_timeout, tcp_established_timeout, tcp_transitory_timeout);
 
     /* -- whizbang main loop ;-) */
     while( sr_read_from_server(&sr) == 1);
@@ -253,6 +246,8 @@ static void sr_destroy_instance(struct sr_instance* sr)
     /*
     fprintf(stderr,"sr_destroy_instance leaking memory\n");
     */
+    sr_arpcache_destroy(&(sr->cache));
+    sr_nat_destroy(&(sr->nat));
 } /* -- sr_destroy_instance -- */
 
 /*-----------------------------------------------------------------------------
@@ -262,11 +257,10 @@ static void sr_destroy_instance(struct sr_instance* sr)
  *
  *----------------------------------------------------------------------------*/
 
-static void sr_init_instance(struct sr_instance* sr, struct sr_nat* nat)
+static void sr_init_instance(struct sr_instance* sr)
 {
     /* REQUIRES */
     assert(sr);
-    assert(nat);
 
     sr->sockfd = -1;
     sr->user[0] = 0;
@@ -275,8 +269,6 @@ static void sr_init_instance(struct sr_instance* sr, struct sr_nat* nat)
     sr->if_list = 0;
     sr->routing_table = 0;
     sr->logfile = 0;
-
-    sr->nat = nat;
 } /* -- sr_init_instance -- */
 
 /*-----------------------------------------------------------------------------

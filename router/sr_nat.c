@@ -12,38 +12,44 @@
 #define IS_SYN(flags) ((flags) & (tcp_flag_syn))
 #define IS_FIN(flags) ((flags) & (tcp_flag_fin))
 
-int sr_nat_init(struct sr_nat *nat, uint32_t icmp_query_timeout,
+int sr_nat_init(struct sr_nat *nat, int is_active, uint32_t icmp_query_timeout,
   uint32_t tcp_established_idle_timeout,uint32_t tcp_transitory_idle_timeout) { /* Initializes the nat */
 
   assert(nat);
+  nat->is_active = is_active;
 
   /* Acquire mutex lock */
   pthread_mutexattr_init(&(nat->attr));
   pthread_mutexattr_settype(&(nat->attr), PTHREAD_MUTEX_RECURSIVE);
-  int success = pthread_mutex_init(&(nat->tcp_lock), &(nat->attr)) && pthread_mutex_init(&(nat->icmp_lock), &(nat->attr));
+  int success1 = pthread_mutex_init(&(nat->tcp_lock), &(nat->attr));
+  int success2 = pthread_mutex_init(&(nat->icmp_lock), &(nat->attr));
 
   /* Initialize timeout thread */
 
   pthread_attr_init(&(nat->thread_attr));
   pthread_attr_setdetachstate(&(nat->thread_attr), PTHREAD_CREATE_JOINABLE);
   pthread_attr_setscope(&(nat->thread_attr), PTHREAD_SCOPE_SYSTEM);
-  pthread_create(&(nat->thread), &(nat->thread_attr), sr_nat_timeout, nat);
-
+  pthread_attr_setscope(&(nat->thread_attr), PTHREAD_SCOPE_SYSTEM);
+  
   /* CAREFUL MODIFYING CODE ABOVE THIS LINE! */
 
-  nat->is_active = 1;
-  nat->tcp_mappings = NULL;
-  nat->icmp_mappings = NULL;
+  if (nat->is_active) {
+    pthread_create(&(nat->thread), &(nat->thread_attr), sr_nat_timeout, nat);
 
-  /* Initialize any variables here */
-  nat->icmp_query_timeout = icmp_query_timeout;
-  nat->tcp_established_idle_timeout = tcp_established_idle_timeout;
-  nat->tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
+    nat->is_active = 1;
+    nat->tcp_mappings = NULL;
+    nat->icmp_mappings = NULL;
 
-  nat->aux_tcp = htons(START_PORT);
-  nat->aux_icmp = htons(START_ID);
+    /* Initialize any variables here */
+    nat->icmp_query_timeout = icmp_query_timeout;
+    nat->tcp_established_idle_timeout = tcp_established_idle_timeout;
+    nat->tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
 
-  return success;
+    nat->aux_tcp = htons(START_PORT);
+    nat->aux_icmp = htons(START_ID);
+  }
+
+  return success1 == 0 && success2 == 0;
 }
 
 int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
@@ -75,7 +81,10 @@ int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
   pthread_mutex_unlock(&(nat->icmp_lock));
 
   /* free nat memory here */
-  pthread_kill(nat->thread, SIGKILL);
+  if (nat->is_active) {
+    pthread_kill(nat->thread, SIGKILL);
+  }
+
   return pthread_mutex_destroy(&(nat->tcp_lock)) &&
     pthread_mutex_destroy(&(nat->icmp_lock)) &&
     pthread_mutexattr_destroy(&(nat->attr));
@@ -197,7 +206,7 @@ void timeout_tcp_connections(struct sr_nat_mapping* map){
         curr_conn = curr_conn->next;
         prev_conn->next = curr_conn;
       }
-      
+
       free(delete_this_conn);
     } else {
       prev_conn = curr_conn;
@@ -212,8 +221,8 @@ void timeout_tcp_connections(struct sr_nat_mapping* map){
 struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
     uint16_t aux_ext, sr_nat_mapping_type type ) {
 
-  pthread_mutex_t lock = get_type_lock(nat, type);
-  pthread_mutex_lock(&(lock));
+  pthread_mutex_t *lock = get_type_lock(nat, type);
+  pthread_mutex_lock(lock);
 
   struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_external_ptr(nat,
@@ -225,7 +234,7 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
     memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
   }
 
-  pthread_mutex_unlock(&(lock));
+  pthread_mutex_unlock(lock);
   return copy;
 }
 
@@ -254,8 +263,8 @@ struct sr_nat_mapping *sr_nat_lookup_external_ptr(struct sr_nat *nat,
 struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
 
-  pthread_mutex_t lock = get_type_lock(nat, type);
-  pthread_mutex_lock(&(lock));
+  pthread_mutex_t *lock = get_type_lock(nat, type);
+  pthread_mutex_lock(lock);
 
   struct sr_nat_mapping *copy = NULL;
   struct sr_nat_mapping *mapping_ptr = sr_nat_lookup_internal_ptr(nat,
@@ -267,7 +276,7 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
     memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
   }
   
-  pthread_mutex_unlock(&(lock));
+  pthread_mutex_unlock(lock);
   return copy;
 }
 
@@ -299,8 +308,8 @@ struct sr_nat_mapping *sr_nat_lookup_internal_ptr(struct sr_nat *nat,
 struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type ) {
 
-  pthread_mutex_t lock = get_type_lock(nat, type);
-  pthread_mutex_lock(&(lock));
+  pthread_mutex_t *lock = get_type_lock(nat, type);
+  pthread_mutex_lock(lock);
 
   /* handle insert here, create a mapping, and then return a copy of it */
   struct sr_nat_mapping *copy = malloc(sizeof(struct sr_nat_mapping));
@@ -325,7 +334,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
   /* Create a copy of the mapping */
   memcpy(copy, mapping_ptr, sizeof(struct sr_nat_mapping));
 
-  pthread_mutex_unlock(&(lock));
+  pthread_mutex_unlock(lock);
   return copy;
 }
 
@@ -541,11 +550,11 @@ struct sr_nat_mapping *get_type_mapping(struct sr_nat* nat, sr_nat_mapping_type 
   }
 }
 
-pthread_mutex_t get_type_lock(struct sr_nat* nat, sr_nat_mapping_type type) {
+pthread_mutex_t *get_type_lock(struct sr_nat* nat, sr_nat_mapping_type type) {
   if (type == nat_mapping_icmp) {
-    return nat->icmp_lock;
+    return &(nat->icmp_lock);
   } else {
-    return nat->tcp_lock;
+    return &(nat->tcp_lock);
   }
 }
 

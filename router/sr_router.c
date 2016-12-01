@@ -30,13 +30,15 @@
  *
  *---------------------------------------------------------------------*/
 
-void sr_init(struct sr_instance* sr)
+void sr_init(struct sr_instance* sr, int useNat, unsigned int icmp_timeout, unsigned int tcp_established_timeout,
+  unsigned int tcp_transitory_timeout)
 {
     /* REQUIRES */
     assert(sr);
 
     /* Initialize cache and cache cleanup thread */
     sr_arpcache_init(&(sr->cache));
+    sr_nat_init(&(sr->nat), useNat, icmp_timeout, tcp_established_timeout, tcp_transitory_timeout);
 
     pthread_attr_init(&(sr->attr));
     pthread_attr_setdetachstate(&(sr->attr), PTHREAD_CREATE_JOINABLE);
@@ -204,11 +206,11 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
   int forwardNATPacket = 0;
 
   /* Apply NAT logic to the packet if it is active */
-  if (sr->nat->is_active && ip_hdr->ip_ttl > 1) {
+  if (sr->nat.is_active && ip_hdr->ip_ttl > 1) {
     /* NAT is only used in certain cases
        This occurs when, 1. Internal(source) to external(destination) interface
                          2. External(source) to the external NAT interface (destination) */
-    if (sr_is_interface_external(reply_interface) && ip_hdr->ip_dst == sr->nat->external_if_ip) {
+    if (sr_is_interface_external(reply_interface) && ip_hdr->ip_dst == sr->nat.external_if_ip) {
       forwardNATPacket = 1;
     } else {
       struct sr_rt* forward_rt = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_dst);
@@ -266,7 +268,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_if *incoming_int
 
       /* Decrement the TTL */
       increment_ttl(forwarding_packet, -1);
-    
+  
       if (arp_entry == NULL) {
         /* Entry for ip_dst missing in cache table, queue the packet*/       
         queue_ethernet_packet(sr, forwarding_packet, ip_packet_len, eth_dest);
@@ -407,7 +409,7 @@ struct sr_if *sr_copy_interface(struct sr_if *interface) {
 int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, uint8_t *ip_packet) {
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)ip_packet;
 
-  if (sr->nat->is_active) {
+  if (sr->nat.is_active) {
     uint16_t id = 0;
     sr_nat_mapping_type type;
 
@@ -425,7 +427,7 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
     /* Packets from external sources to the router without a NAT mapping are determined to be
        for the router */
     if (sr_is_interface_external(interface)) {
-      struct sr_nat_mapping *mapping = sr_nat_lookup_external(sr->nat, id, type);
+      struct sr_nat_mapping *mapping = sr_nat_lookup_external(&(sr->nat), id, type);
 
       if (mapping == NULL) {
         return sr_is_packet_recipient(sr, ip_hdr->ip_dst);
@@ -455,7 +457,7 @@ void handle_unsolicited_syn(struct sr_instance* sr, uint8_t* packet){
 void *unsolicited_syn_thread(void* input) {
   struct thread_input* info = (struct thread_input*)input;
   
-  struct sr_nat* nat = info->sr->nat;
+  struct sr_nat nat = info->sr->nat;
   struct sr_instance* sr = info->sr;
   uint8_t* packet = info->packet;
   struct sr_ip_hdr* ip_hdr = (struct sr_ip_hdr*) packet;
@@ -463,7 +465,7 @@ void *unsolicited_syn_thread(void* input) {
 
   time_t curtime = time(NULL);
   sleep(6.0);
-  struct sr_nat_mapping* curr_map = nat->tcp_mappings;
+  struct sr_nat_mapping* curr_map = nat.tcp_mappings;
   
   int success = 0;
 
@@ -483,7 +485,7 @@ void *unsolicited_syn_thread(void* input) {
     struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
 
     sr_object_t icmpPacket = create_icmp_t3_packet(icmp_type_dest_unreachable, icmp_code_3, packet);
-    sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat->external_if_ip, 
+    sr_object_t IPPacket = create_ip_packet(ip_protocol_icmp, nat.external_if_ip, 
                                             ip_hdr->ip_src, icmpPacket.packet, icmpPacket.len);
     
     struct sr_if* source_interface = sr_get_interface(sr, externalInterface);
@@ -517,18 +519,13 @@ void *unsolicited_syn_thread(void* input) {
 
     TODO: handle TCP connection state update */
 int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
-  struct sr_nat* nat = sr->nat;
+  struct sr_nat* nat = &(sr->nat);
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
-
-  fprintf(stderr, "Handle Internal\n");
-  print_hdr_ip(ip_packet);
 
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
 
   if(ip_hdr->ip_p == ip_protocol_icmp) {
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
-
-    print_hdr_icmp((uint8_t *) icmp_hdr);
 
     /* Only need to handle echo requests from internal addresses */
     if (icmp_hdr->icmp_type == icmp_type_echo_request && icmp_hdr->icmp_code == icmp_code_0) {
@@ -546,10 +543,8 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
       free(icmp_mapping);
     }
   } else {
-      sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
-
-      print_hdr_tcp((uint8_t *) tcp_hdr);
-
+      sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
+printf("%d\n",tcp_hdr->port_src);
       /* Initialize the tcp mapping and connections and apply it to the packet */
       struct sr_nat_mapping *mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src, tcp_hdr->port_src, nat_mapping_tcp);
       update_tcp_connection_internal(nat, ip_hdr, tcp_hdr);
@@ -588,18 +583,13 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
 
    TODO: handle TCP connection state update */
 int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
-  struct sr_nat* nat = sr->nat;
+  struct sr_nat* nat = &(sr->nat);
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) ip_packet;
-
-  fprintf(stderr, "Handle External\n");
-  print_hdr_ip(ip_packet);
 
   if(ip_hdr->ip_p == ip_protocol_udp) return 0;
 
   if(ip_hdr->ip_p == ip_protocol_icmp){
     sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
-
-    print_hdr_icmp((uint8_t *) icmp_hdr);
 
     struct sr_nat_mapping *icmp_mapping = sr_nat_lookup_external(nat, icmp_hdr->id, nat_mapping_icmp);
 
@@ -615,9 +605,7 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
 
     free(icmp_mapping);
   } else {
-    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_hdr + sizeof(sr_ip_hdr_t));
-
-    print_hdr_tcp((uint8_t *) tcp_hdr);
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
     /* Lookup for TCP packet */
     struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);

@@ -140,11 +140,11 @@ void sr_set_ether_ip(struct sr_instance* sr, uint32_t ip_nbo)
     if_walker->ip = ip_nbo;
 
     /* Extra functionality to set up NAT external vs internal interfaces */
-    if (sr->nat->is_active) {
+    if (sr->nat.is_active) {
         if (sr_is_interface_internal(if_walker)) {
-            sr->nat->internal_if_ip = if_walker->ip;
+            sr->nat.internal_if_ip = if_walker->ip;
         } else if (sr_is_interface_external(if_walker)) {
-            sr->nat->external_if_ip = if_walker->ip;
+            sr->nat.external_if_ip = if_walker->ip;
         }
     }
 

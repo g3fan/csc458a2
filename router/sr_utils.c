@@ -26,14 +26,18 @@ uint16_t tcp_cksum (uint8_t *ip_packet) {
   struct sr_ip_hdr *ip_hdr = (sr_ip_hdr_t*)ip_packet;
   uint8_t *tcp_segment = (uint8_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
-  uint16_t tcp_segment_len = ip_hdr->ip_len - sizeof(sr_ip_hdr_t); /* Size of the TCP Segment, not including pseudo header */
+  uint16_t tcp_segment_len = ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t); /* Size of the TCP Segment, not including pseudo header */
 
   /*creates psuedo header for TCP and calculate*/
   sr_object_t tcp_pseudo_hdr_wrapper = create_tcp_pseudo_hdr(ip_hdr->ip_src, ip_hdr->ip_dst, tcp_segment_len);
   sr_object_t data = create_combined_packet(tcp_pseudo_hdr_wrapper.packet, tcp_pseudo_hdr_wrapper.len,
     tcp_segment, tcp_segment_len);
 
-  return cksum(data.packet, data.len);
+  uint16_t checksum = cksum(data.packet, data.len);
+  free(tcp_pseudo_hdr_wrapper.packet);
+  free(data.packet);
+
+  return checksum;
 }
 
 void increment_ttl (uint8_t *ip_packet, int increment) {
@@ -153,7 +157,7 @@ sr_object_t create_tcp_pseudo_hdr(uint32_t ip_src, uint32_t ip_dst, uint16_t tcp
   output->ip_dst = ip_dst;
   output->reserved = TCP_PSEUDO_RF;
   output->protocol = ip_protocol_tcp;
-  output->tcp_length = tcp_length;
+  output->tcp_length = htons(tcp_length);
 
   return create_packet((uint8_t *)output, pseudo_hdr_size);
 }

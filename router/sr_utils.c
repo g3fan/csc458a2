@@ -184,7 +184,7 @@ sr_object_t create_combined_packet(uint8_t *hdr, unsigned int hdr_len, uint8_t *
 struct sr_rt* get_longest_prefix_match_interface(struct sr_rt *routingTable, uint32_t targetIP) {
   /* Target IP should be hardware */
     struct sr_rt* currRTEntry = routingTable;
-    uint32_t longestMask = 0;
+    uint32_t longestMask = htonl(0);
     struct sr_rt* output = NULL;
 
     while(currRTEntry) {
@@ -328,11 +328,10 @@ void print_hdr_tcp(uint8_t *buf) {
   fprintf(stderr, "\tdestination port: %d\n", ntohs(tcphdr->port_dst));
   fprintf(stderr, "\tsequence number: %d\n", ntohl(tcphdr->seq_num));
   fprintf(stderr, "\tack number: %d\n", ntohl(tcphdr->ack_num));
-  fprintf(stderr, "\tprotocol: %d\n", tcphdr->protocol);
   fprintf(stderr, "\toffset: %d\n", tcphdr->offset);
   fprintf(stderr, "\treserved: %d\n", tcphdr->reserved);
-  fprintf(stderr, "\tecn: %d\n", tcphdr->ecn);
-  fprintf(stderr, "\tack: %d\n", tcphdr->urg);
+  fprintf(stderr, "\turg: %d\n", tcphdr->urg);
+  fprintf(stderr, "\tack: %d\n", tcphdr->ack);
   fprintf(stderr, "\tpsh: %d\n", tcphdr->psh);
   fprintf(stderr, "\trst: %d\n", tcphdr->rst);
   fprintf(stderr, "\tsyn: %d\n", tcphdr->syn);
@@ -340,7 +339,7 @@ void print_hdr_tcp(uint8_t *buf) {
   fprintf(stderr, "\twindow: %d\n", ntohs(tcphdr->window));
   fprintf(stderr, "\tchecksum: %d\n", tcphdr->tcp_sum);
   fprintf(stderr, "\turgent: %d\n", ntohs(tcphdr->urgent));
-  fprintf(stderr, "\toptions: %d\n", ntohl(tcphdr->options));
+  /*fprintf(stderr, "\toptions: %d\n", ntohl(tcphdr->options));*/
 }
 
 /* Prints out all possible headers, starting from Ethernet */

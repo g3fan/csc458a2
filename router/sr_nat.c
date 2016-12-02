@@ -350,10 +350,11 @@ struct sr_nat_mapping *sr_nat_create_mapping(struct sr_nat *nat,
   newmap->ip_ext = nat->external_if_ip;
   newmap->aux_int = aux_int; 
   newmap->aux_ext = get_unique_aux_ext(nat, ip_int, aux_int, type);
+  newmap->time_created = time(NULL);
   newmap->last_updated = time(NULL);
+  newmap->marked_for_delete = 0;
   newmap->conns = NULL;
   newmap->next = NULL;
-  newmap->marked_for_delete = 0;
   return newmap;
 }
 
@@ -444,7 +445,7 @@ void update_tcp_connection_external(struct sr_nat *nat, sr_ip_hdr_t *ip_hdr, sr_
 
 void update_tcp_connection(struct sr_nat_mapping *mapping, sr_ip_hdr_t *ip_hdr, sr_tcp_hdr_t *tcp_hdr) {
   uint32_t ip_ext = mapping->ip_ext;
-  uint16_t aux_ext = mapping->aux_ext;;
+  uint16_t aux_ext = mapping->aux_ext;
   uint32_t ip_remote = ip_hdr->ip_dst;
   uint16_t aux_remote = tcp_hdr->port_src;
   uint8_t flags = get_tcp_flags(tcp_hdr);

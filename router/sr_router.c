@@ -161,7 +161,7 @@ void sr_handle_packet_reply(struct sr_instance* sr, struct sr_ethernet_hdr* ethe
   /* Only perform replies when handling a valid reply action */
   if (icmp_wrapper.packet != NULL) {
     /* Determine the destination to reply to first through the arp cache */
-    struct sr_rt* longestPrefixIPMatch = get_longest_prefix_match_interface(sr->routing_table,ip_hdr->ip_src);
+    struct sr_rt* longestPrefixIPMatch = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
 
     /* Send destination unreachable if reply destination is not in the forwarding table */
     if (longestPrefixIPMatch == NULL) {
@@ -355,11 +355,14 @@ void queue_ethernet_packet(struct sr_instance *sr, uint8_t *ip_packet, unsigned 
 /* Create an Ethernet packet and send it, len = size of data in bytes*/
 void sr_create_send_ethernet_packet(struct sr_instance* sr, uint8_t* ether_shost, uint8_t* ether_dhost, uint16_t ethertype, uint8_t *data, uint16_t len) {
   char* outgoing_interface = get_interface_from_mac(ether_shost, sr);
-  sr_object_t ethernet_packet = create_ethernet_packet(ether_shost, ether_dhost, ethertype, data, len);
 
-  sr_send_packet(sr, ethernet_packet.packet, ethernet_packet.len, outgoing_interface);
+  if (outgoing_interface != NULL) {
+    sr_object_t ethernet_packet = create_ethernet_packet(ether_shost, ether_dhost, ethertype, data, len);
 
-  free(ethernet_packet.packet);
+    sr_send_packet(sr, ethernet_packet.packet, ethernet_packet.len, outgoing_interface);
+
+    free(ethernet_packet.packet);
+  }
 }
 
 /* Should pass in correct ip*/
@@ -378,7 +381,11 @@ void createAndSendIPPacket(struct sr_instance* sr, uint32_t ip_src, uint32_t ip_
       ip_wrapper.packet,
       ip_wrapper.len);
 
-  sr_send_packet(sr, eth_wrapper.packet, eth_wrapper.len, get_interface_from_mac(eth_src, sr));
+  char* outgoing_interface = get_interface_from_mac(eth_src, sr);
+
+  if (outgoing_interface != NULL) {
+    sr_send_packet(sr, eth_wrapper.packet, eth_wrapper.len, get_interface_from_mac(eth_src, sr));
+  }
 
   free(ip_wrapper.packet);
   free(eth_wrapper.packet);
@@ -493,7 +500,7 @@ void *unsolicited_syn_thread(void* input) {
   int success = 0;
 
   while (curr_map) {
-    if(find_connection(curr_map, ip_hdr->ip_src, tcp_hdr->port_src)){
+    if(find_connection(curr_map, ip_hdr->ip_src, tcp_hdr->port_src) != NULL){
       /* do nothing, or maybe we do have to do something ?*/
       if(difftime(curr_map->time_created, curtime) <= 6.0){
         success = 1;
@@ -562,6 +569,7 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
       icmp_hdr->icmp_sum = htons(0);
       icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t));
 
+      /* An internal->external packet will use the NAT's external ip as its source */
       ip_hdr->ip_src = icmp_mapping->ip_ext;
       ip_hdr->ip_sum = htons(0);
       ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
@@ -580,14 +588,14 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
       struct sr_nat_mapping *mapping = sr_nat_insert_mapping(nat, ip_hdr->ip_src, tcp_hdr->port_src, nat_mapping_tcp);
       update_tcp_connection_internal(nat, ip_hdr, tcp_hdr);
 
-      /* Recalculate checksums */
-      tcp_hdr->port_src = mapping->aux_ext;
-      tcp_hdr->tcp_sum = htons(0);
-      tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
-
       ip_hdr->ip_src = mapping->ip_ext;
       ip_hdr->ip_sum = htons(0);
       ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+
+      /* Tcp must be calculated after ip changes as it depends on ip_src/dst */
+      tcp_hdr->port_src = mapping->aux_ext;
+      tcp_hdr->tcp_sum = htons(0);
+      tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
 
       free(mapping);
   }
@@ -630,6 +638,7 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
     icmp_hdr->icmp_sum = htons(0);
     icmp_hdr->icmp_sum = cksum((uint8_t *) icmp_hdr, ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t));
 
+    /* An external->internal packet will need its destination ip re-translated */
     ip_hdr->ip_dst = icmp_mapping->ip_int;
     ip_hdr->ip_sum = htons(0);
     ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
@@ -641,15 +650,16 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
     /* Lookup for TCP packet */
     struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);
     if (tcp_mapping) {
-      update_tcp_connection_internal(nat, ip_hdr, tcp_hdr);
+      update_tcp_connection_external(nat, ip_hdr, tcp_hdr);
+
+      ip_hdr->ip_dst = tcp_mapping->ip_int;
+      ip_hdr->ip_sum = htons(0);
+      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
       
+      /* Tcp must be calculated after ip changes as it depends on ip_src/dst */
       tcp_hdr->port_src = tcp_mapping->aux_int;
       tcp_hdr->tcp_sum = htons(0);
       tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
-
-      ip_hdr->ip_src = tcp_mapping->ip_int;
-      ip_hdr->ip_sum = htons(0);
-      ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
 
       free(tcp_mapping);
     } else {

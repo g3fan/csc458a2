@@ -26,9 +26,10 @@ uint16_t tcp_cksum (uint8_t *ip_packet) {
   struct sr_ip_hdr *ip_hdr = (sr_ip_hdr_t*)ip_packet;
   uint8_t *tcp_segment = (uint8_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
-  uint16_t tcp_segment_len = ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t); /* Size of the TCP Segment, not including pseudo header */
+  /* Size of the TCP Segment, not including pseudo header */
+  uint16_t tcp_segment_len = ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t); 
 
-  /*creates psuedo header for TCP and calculate*/
+  /* Create psuedo header for TCP and calculate checksum */
   sr_object_t tcp_pseudo_hdr_wrapper = create_tcp_pseudo_hdr(ip_hdr->ip_src, ip_hdr->ip_dst, tcp_segment_len);
   sr_object_t data = create_combined_packet(tcp_pseudo_hdr_wrapper.packet, tcp_pseudo_hdr_wrapper.len,
     tcp_segment, tcp_segment_len);
@@ -183,21 +184,21 @@ sr_object_t create_combined_packet(uint8_t *hdr, unsigned int hdr_len, uint8_t *
    
 struct sr_rt* get_longest_prefix_match_interface(struct sr_rt *routingTable, uint32_t targetIP) {
   /* Target IP should be hardware */
-    struct sr_rt* currRTEntry = routingTable;
-    uint32_t longestMask = htonl(0);
-    struct sr_rt* output = NULL;
+  struct sr_rt* currRTEntry = routingTable;
+  uint32_t longestMask = htonl(0);
+  struct sr_rt* output = NULL;
 
-    while(currRTEntry) {
-        if(targetIPMatchesEntry(currRTEntry->dest.s_addr, currRTEntry->mask.s_addr, targetIP) == 1){ 
-            /* Always use longest mask, taking into account default route mask = 0 */
-            if(ntohl((uint32_t)currRTEntry->mask.s_addr) >= ntohl(longestMask)) {
-                longestMask = (uint32_t)currRTEntry->mask.s_addr;
-                output = currRTEntry;
-            }
-        }
-        currRTEntry = currRTEntry->next;
-    }
-    return output;
+  while(currRTEntry) {
+      if(targetIPMatchesEntry(currRTEntry->dest.s_addr, currRTEntry->mask.s_addr, targetIP) == 1){ 
+          /* Always use longest mask, taking into account default route mask = 0 */
+          if(ntohl((uint32_t)currRTEntry->mask.s_addr) >= ntohl(longestMask)) {
+              longestMask = (uint32_t)currRTEntry->mask.s_addr;
+              output = currRTEntry;
+          }
+      }
+      currRTEntry = currRTEntry->next;
+  }
+  return output;
 }
 
 /*returns 1 for true, 0 for false*/

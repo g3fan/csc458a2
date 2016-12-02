@@ -452,7 +452,7 @@ void update_tcp_connection(struct sr_nat_mapping *mapping, sr_ip_hdr_t *ip_hdr, 
 
   struct sr_nat_connection *connection_ptr = lookup_tcp_connection_ptr(mapping, ip_remote, aux_remote, ip_ext, aux_ext);
 
-  if (connection_ptr) {
+  if (connection_ptr != NULL) {
     update_tcp_connection_state(connection_ptr, flags);
   } else {
     /* If no connection exists, create one */
@@ -574,11 +574,11 @@ uint32_t get_nat_ip_src(struct sr_nat *nat, uint8_t *ip_packet) {
   sr_nat_mapping_type type;
 
   if (ip_hdr->ip_p == ip_protocol_tcp) {
-    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(ip_hdr + sizeof(sr_ip_hdr_t));
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
     aux = tcp_hdr->port_src;
     type = nat_mapping_tcp;
   } else {
-    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_hdr + sizeof(sr_ip_hdr_t));
+    sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
     aux = icmp_hdr->id;
     type = nat_mapping_icmp;
   }

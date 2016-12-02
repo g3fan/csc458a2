@@ -243,6 +243,7 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_ethernet_hdr *et
       uint8_t *nat_packet = malloc(ip_packet_len);
       memcpy(nat_packet, ip_packet, ip_packet_len);
 
+      /* forwarNATPacket, 1 = forward, 0 = don't forward, -1 = send port unreachable */
       if (sr_is_interface_internal(reply_interface)) {
         forwardNATPacket = sr_nat_handle_internal(sr, nat_packet);
       } else {
@@ -258,6 +259,8 @@ void sr_handle_packet_forward(struct sr_instance *sr, struct sr_ethernet_hdr *et
         createAndSendIPPacket(sr, ip_src, ip_dest, eth_src, eth_dest, icmp_t3_wrapper.packet, icmp_t3_wrapper.len);
 
         free(icmp_t3_wrapper.packet);
+        free(nat_packet);
+        return;
       }
 
       forwarding_packet = nat_packet;
@@ -443,6 +446,7 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
     uint16_t id = 0;
     sr_nat_mapping_type type;
     int isValidNATType = 1;
+    int isUnsolicitedSyn = 0;
 
     if (ip_hdr->ip_p == ip_protocol_icmp) {
       sr_icmp_nat_hdr_t *icmp_hdr = (sr_icmp_nat_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
@@ -452,6 +456,7 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
       sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(ip_packet + sizeof(sr_ip_hdr_t));
       id =  tcp_hdr->port_dst;
       type = nat_mapping_tcp;
+      isUnsolicitedSyn = tcp_hdr->syn && ip_hdr->ip_dst == sr->nat.external_if_ip;
     } else {
       isValidNATType = 0;
     }
@@ -461,7 +466,7 @@ int sr_nat_is_packet_recipient(struct sr_instance *sr, struct sr_if *interface, 
     if (isValidNATType && sr_is_interface_external(interface)) {
       struct sr_nat_mapping *mapping = sr_nat_lookup_external(&(sr->nat), id, type);
 
-      if (mapping != NULL) {
+      if (mapping != NULL || isUnsolicitedSyn) {
         free(mapping);
         return 0;
       }
@@ -495,22 +500,26 @@ void *unsolicited_syn_thread(void* input) {
 
   time_t curtime = time(NULL);
   sleep(6.0);
-  struct sr_nat_mapping* curr_map = nat.tcp_mappings;
   
   int success = 0;
 
+  pthread_mutex_lock(&(nat.tcp_lock));
+  struct sr_nat_mapping* curr_map = nat.tcp_mappings;
+
   while (curr_map) {
     if(find_connection(curr_map, ip_hdr->ip_src, tcp_hdr->port_src) != NULL){
-      /* do nothing, or maybe we do have to do something ?*/
+      /* Successful if there is a connection within 6 seconds */
       if(difftime(curr_map->time_created, curtime) <= 6.0){
         success = 1;
+        break;
       }
-      break;
     }
+    curr_map = curr_map->next;
   }
+  pthread_mutex_unlock(&(nat.tcp_lock));
 
-  if (!success) { /*send ICMP port unreachable*/
-
+  /* Ports below 1024 are not allow for NAT and should send back a port unreachable */
+  if (!success && ntohs(tcp_hdr->port_dst) >= 1024) {
     struct sr_rt* targetRT = get_longest_prefix_match_interface(sr->routing_table, ip_hdr->ip_src);
 
     if (targetRT != NULL) {
@@ -530,6 +539,7 @@ void *unsolicited_syn_thread(void* input) {
       free(icmpPacket.packet);
       free(IPPacket.packet);
       free(sendEthernet.packet);
+      free(packet);
     }
   }
   return 0;
@@ -579,8 +589,7 @@ int sr_nat_handle_internal(struct sr_instance *sr, uint8_t *ip_packet){
   } else {
       sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
-      /* Ports below 1024 are not allow for NAT and should send back a port unreachable */
-      if (ntohs(tcp_hdr->port_src) < 1024) {
+      if (ntohs(tcp_hdr->port_dst) < 1024) {
         return -1;
       }
 
@@ -647,8 +656,13 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
   } else {
     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)(ip_packet + sizeof(sr_ip_hdr_t));
 
+    if (ntohs(tcp_hdr->port_dst) < 1024) {
+      return -1;
+    }
+
     /* Lookup for TCP packet */
     struct sr_nat_mapping *tcp_mapping = sr_nat_lookup_external(nat, tcp_hdr->port_dst, nat_mapping_tcp);
+
     if (tcp_mapping) {
       update_tcp_connection_external(nat, ip_hdr, tcp_hdr);
 
@@ -663,7 +677,12 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
 
       free(tcp_mapping);
     } else {
-      if (tcp_hdr->syn) handle_unsolicited_syn(sr, ip_packet);
+      if (tcp_hdr->syn) {
+        uint8_t *copy = malloc(ip_hdr->ip_len);
+        memcpy(copy, ip_packet, ip_hdr->ip_len);
+
+        handle_unsolicited_syn(sr, copy);
+      }
       return 0;
     }
   }

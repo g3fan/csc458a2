@@ -657,7 +657,7 @@ int sr_nat_handle_external(struct sr_instance *sr, uint8_t *ip_packet) {
       ip_hdr->ip_sum = cksum((uint8_t *) ip_hdr, sizeof(sr_ip_hdr_t));
       
       /* Tcp must be calculated after ip changes as it depends on ip_src/dst */
-      tcp_hdr->port_src = tcp_mapping->aux_int;
+      tcp_hdr->port_dst = tcp_mapping->aux_int;
       tcp_hdr->tcp_sum = htons(0);
       tcp_hdr->tcp_sum = tcp_cksum(ip_packet);
 

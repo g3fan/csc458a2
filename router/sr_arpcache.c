@@ -92,23 +92,16 @@ void handle_arpreq(struct sr_arpreq* req, struct sr_instance* sr) {
         } else {
             sr_ethernet_hdr_t* currEthHdr = (sr_ethernet_hdr_t*) packet->buf;
 
-            struct sr_rt* rt;
-            rt = get_Node_From_RoutingTable(sr, req->ip);
-            if(!rt){
-                fprintf(stderr, "problem\n");
-            }
-            
-            struct sr_if* sr_if = sr_get_interface(sr, rt->interface);
-            sr_arp_hdr_t *newArpReq = createARPReqHdr(sr, req, sr_if, currEthHdr->ether_shost);
-            if(!newArpReq){
-                fprintf(stderr, "problem\n");
-            }
+            struct sr_rt* targetRT = get_longest_prefix_match_interface(sr->routing_table, req->ip);
+            struct sr_if *targetInterface = sr_get_interface(sr, targetRT->interface);
+
+            sr_arp_hdr_t *newArpReq = createARPReqHdr(sr, req, targetInterface, currEthHdr->ether_shost);
 
             sr_object_t arp_packet;
             uint8_t broadcastAddr[ETHER_ADDR_LEN]  = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-            arp_packet = create_ethernet_packet(sr_if->addr, broadcastAddr, ethertype_arp,(uint8_t*)newArpReq, sizeof(sr_arp_hdr_t));
+            arp_packet = create_ethernet_packet(targetInterface->addr, broadcastAddr, ethertype_arp,(uint8_t*)newArpReq, sizeof(sr_arp_hdr_t));
 
-            sr_send_packet(sr, arp_packet.packet, arp_packet.len, rt->interface);
+            sr_send_packet(sr, arp_packet.packet, arp_packet.len, targetRT->interface);
             req->sent = time(NULL);
 	        req->times_sent++;
 
